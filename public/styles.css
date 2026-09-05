@@ -1638,6 +1638,24 @@ html[data-theme="dark"] .theme-icon-dark { display: none; }
 /* Bottom nav (hidden on desktop) */
 .bottom-nav { display: none; }
 
+/* Mobile-only header controls (hidden on desktop — the sidebar has full controls) */
+.header-icon-btn {
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 1.05rem;
+  transition: all 0.2s var(--ease-out);
+  flex-shrink: 0;
+}
+.header-icon-btn:hover { background: var(--bg-hover); }
+.mobile-only { display: none; }
+
 /* ═══════════════════════════════════════════
    MOBILE RESPONSIVE LAYOUT
    ═══════════════════════════════════════════ */
@@ -1727,6 +1745,9 @@ html[data-theme="dark"] .theme-icon-dark { display: none; }
   .dashboard-columns { grid-template-columns: 1fr; }
 
   .modal-content { padding: 24px 20px; }
+
+  /* Compact theme + language controls live in the header on mobile */
+  .mobile-only { display: flex !important; align-items: center; justify-content: center; }
 
   /* Keep the toast visible above the bottom nav */
   .toast.show { bottom: 80px; }

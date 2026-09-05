@@ -128,6 +128,27 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 });
 setTheme(getStoredTheme());
 
+// Mobile-only compact controls (the sidebar is hidden on phones)
+const mobileThemeBtn = document.getElementById('mobile-theme-toggle');
+if (mobileThemeBtn) {
+  mobileThemeBtn.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme');
+    const next = current === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    mobileThemeBtn.innerHTML = `<i class="ph ${next === 'dark' ? 'ph-sun' : 'ph-moon'}"></i>`;
+  });
+  // Sync icon with the theme restored from storage
+  mobileThemeBtn.innerHTML = `<i class="ph ${getStoredTheme() === 'dark' ? 'ph-sun' : 'ph-moon'}"></i>`;
+}
+const mobileLangBtn = document.getElementById('mobile-lang-toggle');
+if (mobileLangBtn) {
+  mobileLangBtn.addEventListener('click', () => {
+    applyLanguage(currentLang === 'en' ? 'hi' : 'en');
+    document.getElementById('lang-select').value = currentLang;
+    mobileLangBtn.querySelector('span').textContent = currentLang === 'en' ? 'हिं' : 'EN';
+  });
+}
+
 // ═══════════════════════════════════════════
 // MAP TILE LAYERS
 // ═══════════════════════════════════════════
@@ -842,7 +863,7 @@ document.getElementById('submit-report').addEventListener('click', async () => {
     reportLatLng = null;
     
     document.getElementById('pin-indicator').classList.remove('active');
-    document.getElementById('pin-indicator').innerHTML = `<i class="ph ph-map-pin"></i><span>Click on map to register coordinates</span><button class="btn-text" id="geo-btn">Use GPS</button>`;
+    document.getElementById('pin-indicator').innerHTML = `<i class="ph ph-map-pin"></i><span>${translations[currentLang].click_map_coords}</span><button class="btn-text" id="geo-btn">${translations[currentLang].use_gps}</button>`;
     
     showToast(true, translations[currentLang].proof_accepted || 'File recorded to global system.');
     document.querySelector('[data-panel="map"]').click();
