@@ -51,6 +51,7 @@ const translations = {
     auth_welcome: "Welcome to CleanMap",
     auth_sub: "Sign in to claim cleanups, earn points and build your eco-reputation.",
     near_me: "Near Me", near_me_empty: "No reports within 2 km of you.",
+    nearby_leader: "Nearby Leader", global_champ: "Global #1", lb_none_nearby: "No cleanups nearby yet.",
     lb_empty: "No cleanups yet — be the first eco-warrior! 🌱",
     empty_list: "Nothing here yet. Be the first to report!",
     still_needed: "Still needed:",
@@ -87,6 +88,7 @@ const translations = {
     auth_welcome: "CleanMap में आपका स्वागत है",
     auth_sub: "सफाई का दावा करने, अंक कमाने और अपनी इको-प्रतिष्ठा बनाने के लिए साइन इन करें।",
     near_me: "मेरे पास", near_me_empty: "आपके 2 किमी के दायरे में कोई रिपोर्ट नहीं है।",
+    nearby_leader: "नज़दीकी लीडर", global_champ: "वैश्विक #1", lb_none_nearby: "आस-पास अभी कोई सफाई नहीं हुई।",
     demo_label: "(डेमो)",
     lb_empty: "अभी कोई सफाई नहीं हुई — पहले इको-वॉरियर बनें! 🌱",
     empty_list: "यहां अभी कुछ नहीं है। पहली रिपोर्ट दर्ज करें!",
@@ -230,6 +232,45 @@ async function refreshAllQuietly() {
   renderMapMarkers();
   renderReportCards();
   renderDashboard();
+  renderMapLeaderboard();
+}
+
+// ── Nearby Leader card on the main map (live, follows the map center) ──
+const NEARBY_RADIUS_KM = 5;
+
+function renderMapLeaderboard() {
+  const el = document.getElementById('map-leaderboard');
+  if (!el) return;
+  const t = translations[currentLang];
+
+  const center = mainMap.getCenter();
+  const nearScores = {};
+  reports.forEach(r => {
+    if (r.status === 'cleaned' && r.volunteer && r.lat != null && r.lng != null) {
+      if (haversineKm([center.lat, center.lng], [r.lat, r.lng]) <= NEARBY_RADIUS_KM) {
+        if (!nearScores[r.volunteer]) nearScores[r.volunteer] = { name: r.volunteer, points: 0, count: 0 };
+        nearScores[r.volunteer].points += POINTS[r.severity] || 0;
+        nearScores[r.volunteer].count += 1;
+      }
+    }
+  });
+
+  const nearTop = Object.values(nearScores).sort((a, b) => b.points - a.points)[0];
+  const globalTop = Object.values(volunteerScores).sort((a, b) => b.points - a.points)[0];
+
+  const nearHtml = nearTop
+    ? `<div class="ml-top"><span class="ml-medal">🥇</span><div class="ml-info"><span class="ml-name">${nearTop.name}</span><span class="ml-meta">${nearTop.count} cleaned · ${nearTop.points} PTS</span></div></div>`
+    : `<div class="ml-empty">${t.lb_none_nearby}</div>`;
+
+  const globalHtml = globalTop
+    ? `<div class="ml-global"><i class="ph ph-globe-hemisphere-west"></i> ${t.global_champ}: <strong>${globalTop.name}</strong> · ${globalTop.points} PTS</div>`
+    : '';
+
+  el.innerHTML = `
+    <div class="ml-title"><i class="ph ph-trophy"></i> ${t.nearby_leader}</div>
+    ${nearHtml}
+    ${globalHtml}
+  `;
 }
 
 // ═══════════════════════════════════════════
@@ -304,6 +345,8 @@ navBtns.forEach(btn => {
 const mainMap = L.map('map', { zoomControl: false }).setView(CENTER, 14);
 mainTileLayer = createTileLayer(mainMap, currentMapStyle);
 L.control.zoom({ position: 'topright' }).addTo(mainMap);
+// Recompute the Nearby Leader card whenever the user pans/zooms the map
+mainMap.on('moveend', renderMapLeaderboard);
 
 let mainMarkers = {};
 let reportTabMarkers = {};

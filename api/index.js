@@ -10,14 +10,17 @@ const PORT = process.env.PORT || 3000;
 
 // Initialize Supabase Client
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+const anonKey = process.env.SUPABASE_KEY;
+// Optional: service_role key for server-side writes (bypasses RLS).
+// NEVER expose this to the browser — only /api/config's anon key is public.
+const serviceKey = process.env.SUPABASE_SERVICE_KEY || null;
 
-if (!supabaseUrl || !supabaseKey) {
+if (!supabaseUrl || !anonKey) {
   console.error("❌ ERROR: SUPABASE_URL or SUPABASE_KEY is missing from environment variables.");
 }
 
-const supabase = (supabaseUrl && supabaseKey) 
-  ? createClient(supabaseUrl, supabaseKey)
+const supabase = (supabaseUrl && anonKey)
+  ? createClient(supabaseUrl, serviceKey || anonKey)
   : null;
 
 // ── Middleware ──
@@ -48,7 +51,7 @@ app.get('/api/config', (req, res) => {
     success: true,
     data: {
       url: supabaseUrl,
-      key: supabaseKey
+      key: anonKey
     }
   });
 });

@@ -1638,6 +1638,64 @@ html[data-theme="dark"] .theme-icon-dark { display: none; }
 /* Bottom nav (hidden on desktop) */
 .bottom-nav { display: none; }
 
+/* ═════ Nearby Leader — live card on the map (top right) ═════ */
+.map-leaderboard {
+  position: absolute;
+  top: 64px;
+  right: 16px;
+  z-index: 900;
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  min-width: 210px;
+  max-width: 260px;
+  box-shadow: var(--shadow-md);
+  font-size: 0.78rem;
+  color: var(--text-main);
+  pointer-events: none;
+  animation: legendFadeIn 0.6s var(--ease-out) both;
+  animation-delay: 0.7s;
+}
+.ml-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.66rem;
+  margin-bottom: 8px;
+}
+.ml-title i { color: #f59e0b; font-size: 0.9rem; }
+.ml-top { display: flex; align-items: center; gap: 8px; }
+.ml-medal { font-size: 1.3rem; }
+.ml-info { display: flex; flex-direction: column; min-width: 0; }
+.ml-name {
+  font-weight: 700;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ml-meta { font-size: 0.68rem; color: var(--text-muted); }
+.ml-empty { color: var(--text-light); font-size: 0.72rem; }
+.ml-global {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ml-global strong { color: var(--text-main); }
+
 /* Mobile-only header controls (hidden on desktop — the sidebar has full controls) */
 .header-icon-btn {
   width: 34px;
@@ -1726,6 +1784,7 @@ html[data-theme="dark"] .theme-icon-dark { display: none; }
     padding-bottom: 64px;
   }
   .map-legend { display: none; }
+  .map-leaderboard { display: none; }
 
   /* Report form: mini-map on top, form below, whole thing scrolls */
   .report-layout {
