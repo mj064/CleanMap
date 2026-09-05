@@ -1518,3 +1518,216 @@ html[data-theme="dark"] .theme-icon-dark { display: none; }
 .form-actions {
   margin-top: 8px;
 }
+
+/* ═══════════════════════════════════════════
+   AUTHENTICATION UI
+   ═══════════════════════════════════════════ */
+.auth-area { margin-bottom: 12px; }
+
+.signin-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+  padding: 10px 14px;
+  border: none;
+  background: var(--accent-gradient);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.88rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  box-shadow: var(--accent-glow);
+  transition: transform 0.2s var(--ease-out);
+}
+.signin-btn:hover { transform: translateY(-1px); }
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-md);
+}
+.user-avatar {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent-gradient);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.95rem;
+}
+.user-info { display: flex; flex-direction: column; min-width: 0; }
+.user-name {
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-signout {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  text-align: left;
+}
+.user-signout:hover { color: var(--color-high); }
+
+/* Auth modal */
+.auth-tabs {
+  display: flex;
+  gap: 6px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-full);
+  padding: 4px;
+  margin-bottom: 18px;
+}
+.auth-tab {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-full);
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out);
+}
+.auth-tab.active {
+  background: var(--accent-gradient);
+  color: #ffffff;
+}
+
+.auth-error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  margin-top: 12px;
+}
+
+/* Photo previews */
+#photo-preview,
+#after-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  margin-top: 10px;
+  border: 1px solid var(--border-subtle);
+}
+
+/* Bottom nav (hidden on desktop) */
+.bottom-nav { display: none; }
+
+/* ═══════════════════════════════════════════
+   MOBILE RESPONSIVE LAYOUT
+   ═══════════════════════════════════════════ */
+@media (max-width: 900px) {
+  /* Sidebar nav is replaced by the bottom bar */
+  .app-nav { display: none; }
+
+  .app-header {
+    padding: 0 14px;
+    position: sticky;
+    top: 0;
+  }
+  .header-search { width: 100%; max-width: none; flex: 1; }
+
+  /* Fixed bottom navigation bar */
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-top: 1px solid var(--border-subtle);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  }
+  .bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 6px 0;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.62rem;
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    position: relative;
+    overflow: hidden;
+  }
+  .bottom-nav-item i { font-size: 1.35rem; position: relative; z-index: 1; }
+  .bottom-nav-item span { position: relative; z-index: 1; }
+  .bottom-nav-item.active { color: #ffffff; }
+  .bottom-nav-item.active::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--accent-gradient);
+    border-radius: var(--radius-md);
+  }
+
+  /* Panels need room above the bottom bar */
+  .panel { padding-bottom: 64px; }
+
+  /* Map view: stacked — map on top, reports list below */
+  .map-view { flex-direction: column; }
+  #map { height: 42%; flex: none; }
+  .reports-sidebar {
+    width: 100%;
+    height: 58%;
+    border-left: none;
+    border-top: 1px solid var(--border-subtle);
+    box-shadow: none;
+    padding-bottom: 64px;
+  }
+  .map-legend { display: none; }
+
+  /* Report form: mini-map on top, form below, whole thing scrolls */
+  .report-layout {
+    flex-direction: column-reverse;
+    overflow-y: auto;
+  }
+  .report-form-card {
+    width: 100%;
+    border-right: none;
+    padding: 24px 18px;
+    height: auto;
+    box-shadow: none;
+  }
+  .form-map-container { height: 260px; flex: none; position: relative; }
+
+  /* Dashboard: single column */
+  .dashboard-columns { grid-template-columns: 1fr; }
+
+  .modal-content { padding: 24px 20px; }
+
+  /* Keep the toast visible above the bottom nav */
+  .toast.show { bottom: 80px; }
+}

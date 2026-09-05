@@ -9,6 +9,7 @@ let reports = [];
 let activeFilter = 'all';
 let currentMapStyle = 'liberty';
 let sbClient = null;
+let currentUser = null; // Supabase auth user (null when signed out)
 
 // ── Points Configuration ──
 const POINTS = { low: 10, medium: 25, high: 50 };
@@ -46,6 +47,10 @@ const translations = {
     pending_action: "Pending Action", no_activity: "No activity.",
     enter_vol_name: "Enter your Volunteer Name:", proof_accepted: "Proof accepted! Spot marked Cleaned.",
     demo_label: "(Demo)",
+    sign_in: "Sign In", sign_up: "Sign Up", sign_out: "Sign Out",
+    auth_welcome: "Welcome to CleanMap",
+    auth_sub: "Sign in to claim cleanups, earn points and build your eco-reputation.",
+    near_me: "Near Me", near_me_empty: "No reports within 2 km of you.",
     lb_empty: "No cleanups yet — be the first eco-warrior! 🌱",
     empty_list: "Nothing here yet. Be the first to report!",
     still_needed: "Still needed:",
@@ -78,6 +83,10 @@ const translations = {
     new_report_filed: "नई रिपोर्ट दर्ज की गई", total_logs: "कुल लॉग", 
     pending_action: "लंबित कार्रवाई", no_activity: "कोई गतिविधि नहीं।",
     enter_vol_name: "अपना स्वयंसेवक नाम दर्ज करें:", proof_accepted: "प्रमाण स्वीकार किया गया! स्थान को साफ चिह्नित किया गया।",
+    sign_in: "साइन इन", sign_up: "साइन अप", sign_out: "साइन आउट",
+    auth_welcome: "CleanMap में आपका स्वागत है",
+    auth_sub: "सफाई का दावा करने, अंक कमाने और अपनी इको-प्रतिष्ठा बनाने के लिए साइन इन करें।",
+    near_me: "मेरे पास", near_me_empty: "आपके 2 किमी के दायरे में कोई रिपोर्ट नहीं है।",
     demo_label: "(डेमो)",
     lb_empty: "अभी कोई सफाई नहीं हुई — पहले इको-वॉरियर बनें! 🌱",
     empty_list: "यहां अभी कुछ नहीं है। पहली रिपोर्ट दर्ज करें!",
@@ -159,9 +168,9 @@ async function init() {
     
     if (config.success && config.data.url) {
       console.log("🔗 Connecting to Supabase Realtime...");
-      const supabaseClient = supabase.createClient(config.data.url, config.data.key);
+      sbClient = supabase.createClient(config.data.url, config.data.key);
       
-      const channel = supabaseClient
+      const channel = sbClient
         .channel('realtime-reports')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, payload => {
           console.log("⚡ Realtime Update Received:", payload.eventType);
@@ -177,6 +186,9 @@ async function init() {
 
   await refreshAllQuietly();
   setTimeout(() => mainMap.invalidateSize(), 150);
+
+  // Initialize authentication (after sbClient is ready)
+  await initAuth();
 
   // Auto-focus the map on the user's real location on load (Google Maps style)
   locateMe(true);
@@ -446,13 +458,19 @@ document.addEventListener('click', async (e) => {
 // API INTERACTIONS (Claims & Clean)
 // ═══════════════════════════════════════════
 window.claimReport = async function(id) {
-  const volName = prompt(translations[currentLang].enter_vol_name, "John D.");
-  if (!volName) return;
+  // Signed-in users claim under their identity; guests fall back to a prompt
+  let volName;
+  if (currentUser) {
+    volName = currentUser.user_metadata?.name || currentUser.email?.split('@')[0] || 'Volunteer';
+  } else {
+    volName = prompt(translations[currentLang].enter_vol_name, "John D.");
+    if (!volName) return;
+  }
   try {
     const res = await fetch(`${API_BASE}/reports/${id}/claim`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ volunteer: volName.trim() })
+      body: JSON.stringify({ volunteer: volName.trim(), user_id: currentUser?.id || null })
     });
     if ((await res.json()).success) showToast(true, translations[currentLang].in_progress_tab + '...');
   } catch(e) {}
@@ -470,6 +488,7 @@ document.getElementById('close-proof-modal').addEventListener('click', () => {
   document.getElementById('proof-modal').style.display = 'none';
   targetCleanId = null;
   document.getElementById('after-photo').value = '';
+  document.getElementById('after-preview').style.display = 'none';
 });
 
 document.getElementById('submit-proof-btn').addEventListener('click', async () => {
@@ -515,15 +534,24 @@ function renderReportCards() {
   const list = document.getElementById('reports-list');
   list.innerHTML = '';
   
-  const filtered = reports.filter(r => (activeFilter === 'all' ? true : r.status === activeFilter));
+  const filtered = reports.filter(r => {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'near-me') {
+      if (!nearMeCoords || r.lat == null || r.lng == null) return false;
+      return haversineKm(nearMeCoords, [r.lat, r.lng]) <= 2;
+    }
+    return r.status === activeFilter;
+  });
   document.getElementById('report-count').textContent = filtered.length;
   
   if (filtered.length === 0) {
+    const emptyIcon = activeFilter === 'near-me' ? 'ph-binoculars' : 'ph-map-pin-area';
+    const emptyMsg = activeFilter === 'near-me' ? translations[currentLang].near_me_empty : translations[currentLang].empty_list;
     list.innerHTML = `
       <div class="empty-state">
-        <i class="ph ph-map-pin-area"></i>
-        <p>${translations[currentLang].empty_list}</p>
-        <button class="btn btn-primary" onclick="document.querySelector('[data-panel=&quot;report&quot;]').click()">${translations[currentLang].new_report}</button>
+        <i class="ph ${emptyIcon}"></i>
+        <p>${emptyMsg}</p>
+        ${activeFilter === 'near-me' ? '' : `<button class="btn btn-primary" onclick="document.querySelector('[data-panel=&quot;report&quot;]').click()">${translations[currentLang].new_report}</button>`}
       </div>
     `;
     return;
@@ -569,13 +597,46 @@ function renderReportCards() {
   });
 }
 
-document.querySelectorAll('.filter-tab').forEach(chip => {
+document.querySelectorAll('.filter-tab[data-filter]').forEach(chip => {
   chip.addEventListener('click', () => {
+    nearMeCoords = null;
     document.querySelectorAll('.filter-tab').forEach(c => c.classList.remove('active'));
     chip.classList.add('active');
     activeFilter = chip.dataset.filter;
     renderReportCards();
   });
+});
+
+// ── Near-Me filter (2 km radius around the user) ──
+let nearMeCoords = null;
+
+function haversineKm([lat1, lng1], [lat2, lng2]) {
+  const R = 6371, toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+document.getElementById('near-me-tab').addEventListener('click', async () => {
+  const tab = document.getElementById('near-me-tab');
+
+  // Toggle off → back to "All"
+  if (nearMeCoords) {
+    nearMeCoords = null;
+    activeFilter = 'all';
+    document.querySelectorAll('.filter-tab').forEach(c => c.classList.remove('active'));
+    document.querySelector('.filter-tab[data-filter="all"]').classList.add('active');
+    renderReportCards();
+    return;
+  }
+
+  const pos = await locateMe(true);
+  if (!pos) return;
+  nearMeCoords = [pos.coords.latitude, pos.coords.longitude];
+  activeFilter = 'near-me';
+  document.querySelectorAll('.filter-tab').forEach(c => c.classList.remove('active'));
+  tab.classList.add('active');
+  renderReportCards();
 });
 
 // SEARCH
@@ -734,6 +795,20 @@ function compressImage(file, maxWidth = 800) {
   });
 }
 
+// ── Photo previews (before choosing to upload) ──
+document.getElementById('report-photo').addEventListener('change', (e) => {
+  const preview = document.getElementById('photo-preview');
+  const file = e.target.files[0];
+  if (file) { preview.src = URL.createObjectURL(file); preview.style.display = 'block'; }
+  else preview.style.display = 'none';
+});
+document.getElementById('after-photo').addEventListener('change', (e) => {
+  const preview = document.getElementById('after-preview');
+  const file = e.target.files[0];
+  if (file) { preview.src = URL.createObjectURL(file); preview.style.display = 'block'; }
+  else preview.style.display = 'none';
+});
+
 document.getElementById('submit-report').addEventListener('click', async () => {
   const btn = document.getElementById('submit-report');
   btn.disabled = true; btn.textContent = 'Processing...';
@@ -747,7 +822,10 @@ document.getElementById('submit-report').addEventListener('click', async () => {
     description: document.getElementById('report-desc').value.trim(),
     severity: selectedSeverity,
     lat: reportLatLng.lat, lng: reportLatLng.lng,
-    reporter: document.getElementById('report-reporter').value.trim() || 'Anonymous',
+    reporter: currentUser
+      ? (currentUser.user_metadata?.name || currentUser.email?.split('@')[0] || 'Volunteer')
+      : (document.getElementById('report-reporter').value.trim() || 'Anonymous'),
+    user_id: currentUser?.id || null,
     photoBase64: photoBase64
   };
 
@@ -755,8 +833,9 @@ document.getElementById('submit-report').addEventListener('click', async () => {
 
   if (newReport.success) {
     document.getElementById('report-title').value = ''; document.getElementById('report-location').value = '';
-    document.getElementById('report-desc').value = ''; document.getElementById('report-reporter').value = '';
+    document.getElementById('report-desc').value = ''; document.getElementById('report-reporter').value = currentUser ? (displayName() || '') : '';
     document.getElementById('report-photo').value = '';
+    document.getElementById('photo-preview').style.display = 'none';
     document.querySelectorAll('.sev-opt').forEach(o => o.classList.remove('selected'));
     selectedSeverity = null;
     if (reportPin) { reportMap.removeLayer(reportPin); reportPin = null; }
@@ -784,6 +863,120 @@ function showToast(success, msg) {
   document.getElementById('toast-msg').textContent = msg;
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 4000);
+}
+
+// ═══════════════════════════════════════════
+// AUTHENTICATION (Supabase Auth)
+// ═══════════════════════════════════════════
+let authMode = 'signin';
+
+function displayName() {
+  if (!currentUser) return null;
+  return currentUser.user_metadata?.name || currentUser.email?.split('@')[0] || 'Volunteer';
+}
+
+function renderAuthUI() {
+  const area = document.getElementById('auth-area');
+  if (!area) return;
+
+  if (currentUser) {
+    const name = displayName();
+    const initial = (name || 'U').charAt(0).toUpperCase();
+    area.innerHTML = `
+      <div class="user-chip">
+        <span class="user-avatar">${initial}</span>
+        <div class="user-info">
+          <span class="user-name">${name}</span>
+          <button class="user-signout" id="signout-btn"><i class="ph ph-sign-out"></i> ${translations[currentLang].sign_out}</button>
+        </div>
+      </div>`;
+    document.getElementById('signout-btn').addEventListener('click', () => sbClient?.auth.signOut());
+  } else {
+    area.innerHTML = `
+      <button class="signin-btn" id="signin-open"><i class="ph ph-sign-in"></i> ${translations[currentLang].sign_in}</button>`;
+    document.getElementById('signin-open').addEventListener('click', openAuthModal);
+  }
+
+  // Prefill / release the reporter name field on the report form
+  const nameInput = document.getElementById('report-reporter');
+  if (nameInput) {
+    if (currentUser) {
+      nameInput.value = displayName();
+      nameInput.disabled = true;
+    } else {
+      nameInput.value = '';
+      nameInput.disabled = false;
+      nameInput.placeholder = 'Anonymous';
+    }
+  }
+}
+
+function openAuthModal() {
+  document.getElementById('auth-error').style.display = 'none';
+  document.getElementById('auth-modal').style.display = 'flex';
+}
+
+document.getElementById('auth-cancel').addEventListener('click', () => {
+  document.getElementById('auth-modal').style.display = 'none';
+});
+
+document.querySelectorAll('.auth-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    authMode = tab.dataset.authtab;
+    document.getElementById('auth-name-row').style.display = authMode === 'signup' ? 'block' : 'none';
+    document.getElementById('auth-submit').textContent =
+      authMode === 'signup' ? translations[currentLang].sign_up : translations[currentLang].sign_in;
+  });
+});
+
+document.getElementById('auth-submit').addEventListener('click', async () => {
+  if (!sbClient) return;
+  const email = document.getElementById('auth-email').value.trim();
+  const pass = document.getElementById('auth-pass').value;
+  const name = document.getElementById('auth-name').value.trim();
+  const errBox = document.getElementById('auth-error');
+
+  if (!email || !pass || (authMode === 'signup' && !name)) {
+    errBox.textContent = 'Please fill in all fields.';
+    errBox.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('auth-submit');
+  btn.disabled = true;
+  const { error } = authMode === 'signup'
+    ? await sbClient.auth.signUp({ email, password: pass, options: { data: { name } } })
+    : await sbClient.auth.signInWithPassword({ email, password: pass });
+  btn.disabled = false;
+
+  if (error) {
+    errBox.textContent = error.message;
+    errBox.style.display = 'block';
+    return;
+  }
+  errBox.style.display = 'none';
+  document.getElementById('auth-modal').style.display = 'none';
+  showToast(true, authMode === 'signup'
+    ? 'Account created! Check your email to confirm, then sign in.'
+    : 'Signed in successfully! 🌱');
+});
+
+async function initAuth() {
+  if (!sbClient) { renderAuthUI(); return; }
+  try {
+    const { data } = await sbClient.auth.getSession();
+    currentUser = data.session?.user || null;
+    renderAuthUI();
+    sbClient.auth.onAuthStateChange((_event, session) => {
+      currentUser = session?.user || null;
+      renderAuthUI();
+    });
+  } catch (err) {
+    console.warn('Auth init failed:', err.message);
+    renderAuthUI();
+  }
 }
 
 // ── BOOTSTRAP ──

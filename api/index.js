@@ -74,7 +74,7 @@ app.get('/api/reports', async (req, res) => {
 
 // POST a new report (with Cloud Storage for Photo)
 app.post('/api/reports', async (req, res) => {
-  const { title, location, description, severity, lat, lng, reporter, photoBase64 } = req.body;
+  const { title, location, description, severity, lat, lng, reporter, user_id, photoBase64 } = req.body;
 
   let photoUrl = null;
 
@@ -109,7 +109,8 @@ app.post('/api/reports', async (req, res) => {
   const newReport = {
     title, location, description, severity, lat, lng, reporter,
     photo: photoUrl,
-    status: 'reported'
+    status: 'reported',
+    ...(user_id ? { user_id } : {})
   };
 
   if (!supabase) return res.status(500).json({ success: false, error: "Database not connected" });
@@ -130,11 +131,11 @@ app.post('/api/reports', async (req, res) => {
 // PATCH: Claim a report
 app.patch('/api/reports/:id/claim', async (req, res) => {
   const { id } = req.params;
-  const { volunteer } = req.body;
+  const { volunteer, user_id } = req.body;
 
   const { data, error } = await supabase
     .from('reports')
-    .update({ status: 'in-progress', volunteer: volunteer || 'Anonymous' })
+    .update({ status: 'in-progress', volunteer: volunteer || 'Anonymous', ...(user_id ? { user_id } : {}) })
     .eq('id', id)
     .select()
     .single();
