@@ -45,7 +45,11 @@ const translations = {
     new_report_filed: "New Report filed", total_logs: "Total Logs", 
     pending_action: "Pending Action", no_activity: "No activity.",
     enter_vol_name: "Enter your Volunteer Name:", proof_accepted: "Proof accepted! Spot marked Cleaned.",
-    demo_label: "(Demo)"
+    demo_label: "(Demo)",
+    lb_empty: "No cleanups yet — be the first eco-warrior! 🌱",
+    empty_list: "Nothing here yet. Be the first to report!",
+    still_needed: "Still needed:",
+    sev_error: "Couldn't load stats. Try Refresh Sync."
   },
   hi: {
     theme: "थीम", volunteer_leaderboard: "स्वयंसेवक लीडरबोर्ड",
@@ -73,7 +77,11 @@ const translations = {
     new_report_filed: "नई रिपोर्ट दर्ज की गई", total_logs: "कुल लॉग", 
     pending_action: "लंबित कार्रवाई", no_activity: "कोई गतिविधि नहीं।",
     enter_vol_name: "अपना स्वयंसेवक नाम दर्ज करें:", proof_accepted: "प्रमाण स्वीकार किया गया! स्थान को साफ चिह्नित किया गया।",
-    demo_label: "(डेमो)"
+    demo_label: "(डेमो)",
+    lb_empty: "अभी कोई सफाई नहीं हुई — पहले इको-वॉरियर बनें! 🌱",
+    empty_list: "यहां अभी कुछ नहीं है। पहली रिपोर्ट दर्ज करें!",
+    still_needed: "अभी बाकी:",
+    sev_error: "आंकड़े लोड नहीं हो सके। Refresh Sync आज़माएँ।"
   }
 };
 
@@ -208,26 +216,13 @@ function calculateLeaderboard() {
   lbContainer.innerHTML = '';
   
   if (sortedLeaderboard.length === 0) {
-    // Inject 5 mock values if the leaderboard is empty (Hackathon Mode)
-    const mockValues = [
-      { name: "EcoWarrior_99", points: 250, count: 5 },
-      { name: "GreenGuardian", points: 180, count: 4 },
-      { name: "CleanCity_Pro", points: 120, count: 2 },
-      { name: "NatureLover", points: 80, count: 3 },
-      { name: "WasteWatcher", points: 50, count: 1 }
-    ];
-    mockValues.forEach((vol, idx) => {
-      lbContainer.innerHTML += `
-        <div class="lb-row mock">
-          <div class="lb-rank">#${idx + 1}</div>
-          <div class="lb-name">${vol.name} <span style="font-size:0.6rem;opacity:0.6;">${translations[currentLang].demo_label}</span></div>
-          <div class="lb-score">
-            <span class="lb-count">${vol.count} ${translations[currentLang].cleaned_tab.toLowerCase()}</span>
-            <span class="lb-points">${vol.points} PTS</span>
-          </div>
-        </div>
-      `;
-    });
+    // Honest empty state — real scores only (mock demo data removed)
+    lbContainer.innerHTML = `
+      <div class="empty-state">
+        <i class="ph ph-trophy"></i>
+        <p>${translations[currentLang].lb_empty}</p>
+      </div>
+    `;
     return;
   }
 
@@ -442,7 +437,16 @@ function renderReportCards() {
   const filtered = reports.filter(r => (activeFilter === 'all' ? true : r.status === activeFilter));
   document.getElementById('report-count').textContent = filtered.length;
   
-  if (filtered.length === 0) { list.innerHTML = `<div style="text-align:center; padding: 40px 0; color: var(--text-light);">No items to show.</div>`; return; }
+  if (filtered.length === 0) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <i class="ph ph-map-pin-area"></i>
+        <p>${translations[currentLang].empty_list}</p>
+        <button class="btn btn-primary" onclick="document.querySelector('[data-panel=&quot;report&quot;]').click()">${translations[currentLang].new_report}</button>
+      </div>
+    `;
+    return;
+  }
 
   filtered.forEach(r => {
     const card = document.createElement('div');
@@ -520,13 +524,22 @@ searchClear.addEventListener('click', async () => {
 // DASHBOARD
 // ═══════════════════════════════════════════
 async function renderDashboard() {
-  const stats = await (await fetch(`${API_BASE}/stats`)).json();
-  if (!stats.success) return;
+  const t = translations[currentLang];
+  let stats;
+  try {
+    stats = await (await fetch(`${API_BASE}/stats`)).json();
+  } catch (err) {
+    document.getElementById('severity-bars').innerHTML = `<div class="empty-state"><i class="ph ph-wifi-slash"></i><p>${t.sev_error}</p></div>`;
+    return;
+  }
+  if (!stats.success) {
+    document.getElementById('severity-bars').innerHTML = `<div class="empty-state"><i class="ph ph-wifi-slash"></i><p>${t.sev_error}</p></div>`;
+    return;
+  }
 
   const { total, reported, inProgress, cleaned, severity, recentActivity } = stats.data;
   const pct = (n) => total > 0 ? ((n / total) * 100).toFixed(1) : 0;
 
-  const t = translations[currentLang];
   document.getElementById('stats-grid').innerHTML = `
     <div class="stat-card"><div class="stat-val">${total}</div><div class="stat-title">${t.total_logs}</div></div>
     <div class="stat-card"><div class="stat-val" style="color:var(--color-medium)">${reported}</div><div class="stat-title">${t.pending_action}</div></div>
@@ -534,11 +547,15 @@ async function renderDashboard() {
     <div class="stat-card"><div class="stat-val" style="color:var(--color-cleaned)">${cleaned}</div><div class="stat-title">${t.resolved}</div></div>
   `;
 
-  document.getElementById('severity-bars').innerHTML = `
-    <div class="sev-row"><span class="sev-label">${t.high}</span><div class="sev-track"><div class="sev-fill high" style="width:${pct(severity.high)}%"></div></div><span style="font-size:0.8rem; font-weight:600; width:40px; text-align:right">${severity.high}</span></div>
-    <div class="sev-row"><span class="sev-label">${t.medium}</span><div class="sev-track"><div class="sev-fill medium" style="width:${pct(severity.medium)}%"></div></div><span style="font-size:0.8rem; font-weight:600; width:40px; text-align:right">${severity.medium}</span></div>
-    <div class="sev-row"><span class="sev-label">${t.low}</span><div class="sev-track"><div class="sev-fill low" style="width:${pct(severity.low)}%"></div></div><span style="font-size:0.8rem; font-weight:600; width:40px; text-align:right">${severity.low}</span></div>
-  `;
+  if (total === 0) {
+    document.getElementById('severity-bars').innerHTML = `<div class="empty-state"><i class="ph ph-chart-bar"></i><p>${t.no_activity}</p></div>`;
+  } else {
+    document.getElementById('severity-bars').innerHTML = `
+      <div class="sev-row"><span class="sev-label">${t.high}</span><div class="sev-track"><div class="sev-fill high" style="width:${pct(severity.high)}%"></div></div><span style="font-size:0.8rem; font-weight:600; width:40px; text-align:right">${severity.high}</span></div>
+      <div class="sev-row"><span class="sev-label">${t.medium}</span><div class="sev-track"><div class="sev-fill medium" style="width:${pct(severity.medium)}%"></div></div><span style="font-size:0.8rem; font-weight:600; width:40px; text-align:right">${severity.medium}</span></div>
+      <div class="sev-row"><span class="sev-label">${t.low}</span><div class="sev-track"><div class="sev-fill low" style="width:${pct(severity.low)}%"></div></div><span style="font-size:0.8rem; font-weight:600; width:40px; text-align:right">${severity.low}</span></div>
+    `;
+  }
 
   const feed = document.getElementById('activity-feed');
   if (recentActivity && recentActivity.length > 0) {
@@ -592,7 +609,26 @@ document.querySelectorAll('.sev-opt').forEach(opt => {
 function checkFormValidity() {
   const title = document.getElementById('report-title').value.trim();
   const loc = document.getElementById('report-location').value.trim();
-  document.getElementById('submit-report').disabled = !(title && loc && reportLatLng && selectedSeverity);
+  const t = translations[currentLang];
+
+  // Collect what's still missing so the disabled button explains itself
+  const missing = [];
+  if (!reportLatLng) missing.push(t.click_map_coords);
+  if (!title) missing.push(t.brief_title);
+  if (!loc) missing.push(t.landmark);
+  if (!selectedSeverity) missing.push(t.severity_class);
+
+  const btn = document.getElementById('submit-report');
+  btn.disabled = missing.length > 0;
+
+  const hint = document.getElementById('form-hint');
+  if (missing.length > 0) {
+    hint.style.display = 'flex';
+    hint.innerHTML = `<i class="ph ph-info"></i><span>${t.still_needed} ${missing.join(' · ')}</span>`;
+  } else {
+    hint.style.display = 'none';
+    hint.innerHTML = '';
+  }
 }
 
 document.getElementById('report-title').addEventListener('input', checkFormValidity);
