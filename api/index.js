@@ -44,7 +44,7 @@ app.get('/api/health', (req, res) => {
 
 // Deliver public keys to frontend for WebSockets
 app.get('/api/config', (req, res) => {
-  if (!supabaseUrl || !supabaseKey) {
+  if (!supabaseUrl || !anonKey) {
     return res.status(500).json({ success: false, error: "Supabase keys missing in Vercel" });
   }
   res.json({
