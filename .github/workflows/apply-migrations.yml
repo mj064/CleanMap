@@ -1,11 +1,12 @@
-name: Apply Supabase Migrations
+name: Apply Supabase Migrations (manual)
+
+# NOTE: Automatic migration is handled by Supabase's native GitHub integration
+# (Project → GitHub card). This workflow is kept as a MANUAL FALLBACK only —
+# run it from the Actions tab if the integration is unavailable.
+# It cannot fire on push, so it can never race the Supabase integration.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'supabase/migrations/**'
-  workflow_dispatch: {}   # allows manual runs from the Actions tab
+  workflow_dispatch: {}   # manual runs only, from the Actions tab
 
 concurrency:
   group: supabase-migrate
