@@ -49,7 +49,8 @@ const translations = {
     lb_empty: "No cleanups yet — be the first eco-warrior! 🌱",
     empty_list: "Nothing here yet. Be the first to report!",
     still_needed: "Still needed:",
-    sev_error: "Couldn't load stats. Try Refresh Sync."
+    sev_error: "Couldn't load stats. Try Refresh Sync.",
+    loc_fail: "Couldn't get your location — check browser permissions."
   },
   hi: {
     theme: "थीम", volunteer_leaderboard: "स्वयंसेवक लीडरबोर्ड",
@@ -81,7 +82,8 @@ const translations = {
     lb_empty: "अभी कोई सफाई नहीं हुई — पहले इको-वॉरियर बनें! 🌱",
     empty_list: "यहां अभी कुछ नहीं है। पहली रिपोर्ट दर्ज करें!",
     still_needed: "अभी बाकी:",
-    sev_error: "आंकड़े लोड नहीं हो सके। Refresh Sync आज़माएँ।"
+    sev_error: "आंकड़े लोड नहीं हो सके। Refresh Sync आज़माएँ।",
+    loc_fail: "आपकी लोकेशन नहीं मिली — ब्राउज़र की अनुमति जांचें।"
   }
 };
 
@@ -175,6 +177,9 @@ async function init() {
 
   await refreshAllQuietly();
   setTimeout(() => mainMap.invalidateSize(), 150);
+
+  // Auto-focus the map on the user's real location on load (Google Maps style)
+  locateMe(true);
 }
 
 async function fetchReports(params = {}) {
@@ -360,6 +365,82 @@ function renderMapMarkers() {
     }
   });
 }
+
+// ═══════════════════════════════════════════
+// USER LOCATION (GPS) — shared by main map,
+// locate button and the report form's "Use GPS"
+// ═══════════════════════════════════════════
+let userMarker = null, userAccuracy = null;
+
+function getUserLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('Geolocation not supported'));
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 30000
+    });
+  });
+}
+
+function showUserOnMap(coords, { flyTo = true } = {}) {
+  const latlng = [coords.latitude, coords.longitude];
+
+  // Pulsing blue dot
+  const icon = L.divIcon({
+    className: '',
+    html: '<div class="user-dot"><span></span></div>',
+    iconSize: [20, 20], iconAnchor: [10, 10]
+  });
+  if (userMarker) {
+    userMarker.setLatLng(latlng);
+  } else {
+    userMarker = L.marker(latlng, { icon, zIndexOffset: 2000, interactive: false }).addTo(mainMap);
+  }
+
+  // Accuracy halo circle
+  if (userAccuracy) {
+    userAccuracy.setLatLng(latlng);
+    userAccuracy.setRadius(coords.accuracy || 50);
+  } else {
+    userAccuracy = L.circle(latlng, {
+      radius: coords.accuracy || 50,
+      color: '#3b82f6', weight: 1,
+      fillColor: '#3b82f6', fillOpacity: 0.12
+    }).addTo(mainMap);
+  }
+
+  if (flyTo) mainMap.flyTo(latlng, 15, { duration: 1.2 });
+}
+
+async function locateMe(flyTo = true) {
+  try {
+    const pos = await getUserLocation();
+    showUserOnMap(pos.coords, { flyTo });
+    return pos;
+  } catch (err) {
+    console.warn('Geolocation failed:', err.message);
+    showToast(false, translations[currentLang].loc_fail);
+    return null;
+  }
+}
+
+// Locate-me button on the main map
+document.getElementById('locate-btn').addEventListener('click', () => locateMe(true));
+
+// "Use GPS" in the report form (delegated — the button gets re-created
+// via innerHTML after each submission, so a direct listener would die)
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('#geo-btn');
+  if (!btn) return;
+  const pos = await locateMe(false);
+  if (pos && reportMap) {
+    const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    reportMap.setView(latlng, 16);
+    // Reuse the existing map-click handler to drop the report pin
+    reportMap.fireEvent('click', { latlng });
+  }
+});
 
 // ═══════════════════════════════════════════
 // API INTERACTIONS (Claims & Clean)
