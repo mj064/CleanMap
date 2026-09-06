@@ -99,24 +99,26 @@
         <!-- Map Panel -->
         <section class="panel active" id="panel-map">
           <div class="map-view">
-            <div id="map"></div>
+            <div class="map-wrap">
+              <div id="map"></div>
 
-            <button class="map-locate-btn" id="locate-btn" title="Focus my location" aria-label="Focus my location">
-              <i class="ph ph-crosshair"></i>
-            </button>
-            
-            <div class="map-legend">
-              <div class="map-legend-title" data-i18n="legend">Legend</div>
-              <div class="map-legend-item"><span class="map-legend-dot" style="background:var(--color-high)"></span> <span data-i18n="sev_high">High Severity</span></div>
-              <div class="map-legend-item"><span class="map-legend-dot" style="background:var(--color-medium)"></span> <span data-i18n="sev_medium">Medium Severity</span></div>
-              <div class="map-legend-item"><span class="map-legend-dot" style="background:var(--color-low)"></span> <span data-i18n="sev_low">Low Severity</span></div>
-              <div class="map-legend-item"><span class="map-legend-dot" style="background:var(--color-progress)"></span> <span data-i18n="in_progress">In Progress</span></div>
-              <div class="map-legend-item"><span class="map-legend-dot" style="background:var(--color-cleaned)"></span> <span data-i18n="resolved">Resolved</span></div>
+              <button class="map-locate-btn" id="locate-btn" title="Focus my location" aria-label="Focus my location">
+                <i class="ph ph-crosshair"></i>
+              </button>
+
+              <div class="map-legend">
+                <div class="map-legend-title" data-i18n="legend">Legend</div>
+                <div class="map-legend-item"><span class="map-legend-dot" style="background:var(--color-high)"></span> <span data-i18n="sev_high">High Severity</span></div>
+                <div class="map-legend-item"><span class="map-legend-dot" style="background:var(--color-medium)"></span> <span data-i18n="sev_medium">Medium Severity</span></div>
+                <div class="map-legend-item"><span class="map-legend-dot" style="background:var(--color-low)"></span> <span data-i18n="sev_low">Low Severity</span></div>
+                <div class="map-legend-item"><span class="map-legend-dot" style="background:var(--color-progress)"></span> <span data-i18n="in_progress">In Progress</span></div>
+                <div class="map-legend-item"><span class="map-legend-dot" style="background:var(--color-cleaned)"></span> <span data-i18n="resolved">Resolved</span></div>
+              </div>
+
+              <!-- Nearby Leader — live top volunteer around the map center -->
+              <div class="map-leaderboard" id="map-leaderboard" aria-live="polite"></div>
             </div>
 
-            <!-- Nearby Leader — live top volunteer around the map center -->
-            <div class="map-leaderboard" id="map-leaderboard" aria-live="polite"></div>
-            
             <div class="reports-sidebar">
               <div class="sidebar-header">
                 <h2 data-i18n="active_reports">Active Reports</h2>

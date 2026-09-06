@@ -52,6 +52,7 @@ const translations = {
     auth_sub: "Sign in to claim cleanups, earn points and build your eco-reputation.",
     near_me: "Near Me", near_me_empty: "No reports within 2 km of you.",
     nearby_leader: "Nearby Leader", global_champ: "Global #1", lb_none_nearby: "No cleanups nearby yet.",
+    coords: "Coordinates", details_title: "Report Details",
     lb_empty: "No cleanups yet — be the first eco-warrior! 🌱",
     empty_list: "Nothing here yet. Be the first to report!",
     still_needed: "Still needed:",
@@ -89,6 +90,7 @@ const translations = {
     auth_sub: "सफाई का दावा करने, अंक कमाने और अपनी इको-प्रतिष्ठा बनाने के लिए साइन इन करें।",
     near_me: "मेरे पास", near_me_empty: "आपके 2 किमी के दायरे में कोई रिपोर्ट नहीं है।",
     nearby_leader: "नज़दीकी लीडर", global_champ: "वैश्विक #1", lb_none_nearby: "आस-पास अभी कोई सफाई नहीं हुई।",
+    coords: "निर्देशांक", details_title: "रिपोर्ट विवरण",
     demo_label: "(डेमो)",
     lb_empty: "अभी कोई सफाई नहीं हुई — पहले इको-वॉरियर बनें! 🌱",
     empty_list: "यहां अभी कुछ नहीं है। पहली रिपोर्ट दर्ज करें!",
@@ -360,7 +362,10 @@ function createIcon(r) {
 
   return L.divIcon({
     className: '',
-    html: `<div class="marker-pin" style="color: ${color}"></div>`,
+    html: `<div class="marker-with-info">
+             <div class="marker-pin" style="color: ${color}"></div>
+             <span class="marker-info-btn" data-id="${r.id}" title="View details"><i class="ph ph-info"></i></span>
+           </div>`,
     iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -14]
   });
 }
@@ -440,6 +445,55 @@ function renderMapMarkers() {
       reportTabMarkers[r.id] = rmMarker;
     }
   });
+}
+
+// ── Info (ⓘ) badge → full report-details popup ──
+function detailHtml(r) {
+  const t = translations[currentLang];
+  const sevLabel = t[r.severity] || r.severity;
+  const statusLabel = t[`${r.status}_tab`] || r.status;
+  const dateStr = new Date(r.created_at || r.date).toLocaleString();
+
+  return `
+    ${generateBeforeAfterHtml(r)}
+    <div class="popup-title">${t.details_title}</div>
+    <div class="detail-heading">${r.title}</div>
+    <div class="popup-loc"><i class="ph ph-map-pin"></i> ${r.location}</div>
+    <div class="popup-desc">${r.description || 'No description provided.'}</div>
+    <div style="margin-bottom:4px;">
+      <span class="badge sev-${r.severity}"><span class="badge-dot"></span> ${sevLabel}</span>
+      <span class="status-pill ${r.status}" style="float:right;">${statusLabel}</span>
+    </div>
+    <div class="detail-rows">
+      <div><span>${t.filed_by}</span><strong>${r.reporter}</strong></div>
+      ${r.volunteer ? `<div><span>Volunteer</span><strong>${r.volunteer}</strong></div>` : ''}
+      <div><span>${t.on}</span><strong>${dateStr}</strong></div>
+      <div><span>${t.coords}</span><strong>${(r.lat ?? 0).toFixed(5)}, ${(r.lng ?? 0).toFixed(5)}</strong></div>
+    </div>
+  `;
+}
+
+function openDetailPopup(map, r) {
+  L.popup({
+    className: 'custom-popup detail-popup',
+    closeButton: true,
+    maxWidth: 320
+  })
+    .setLatLng([r.lat, r.lng])
+    .setContent(detailHtml(r))
+    .openOn(map);
+}
+
+// Delegated capture-phase listeners: clicking the ⓘ badge opens the details
+// popup and stops the event before Leaflet's normal marker-click popup fires.
+function setupInfoButtons(map) {
+  map.getContainer().addEventListener('click', (e) => {
+    const btn = e.target.closest('.marker-info-btn');
+    if (!btn) return;
+    L.DomEvent.stop(e);
+    const r = reports.find(x => x.id === btn.dataset.id);
+    if (r && r.lat != null) openDetailPopup(map, r);
+  }, true);
 }
 
 // ═══════════════════════════════════════════
@@ -790,6 +844,10 @@ document.getElementById('refresh-dashboard').addEventListener('click', renderDas
 const reportMap = L.map('report-map', { zoomControl: false }).setView(CENTER, 14);
 reportTileLayer = createTileLayer(reportMap, currentMapStyle);
 L.control.zoom({ position: 'topright' }).addTo(reportMap);
+
+// Wire the ⓘ detail buttons on both maps (delegated — survives marker re-renders)
+setupInfoButtons(mainMap);
+setupInfoButtons(reportMap);
 
 let reportPin = null, reportLatLng = null, selectedSeverity = null;
 
