@@ -225,6 +225,7 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
   try {
     let rawText = null;
     let diagInfo = '';
+    let lastGeminiError = '';
 
     if (aiProvider === 'openai') {
       const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -272,7 +273,8 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
           break;
         }
         if (r.status !== 404) throw new Error(`Gemini error ${r.status}`);
-        // 404 = model not available for this key → try next in chain
+        // 404 = model not available for this key → remember why, try next in chain
+        try { const eb = await r.json(); lastGeminiError = `${aiModel}: ${eb?.error?.message || '404'}`; } catch { lastGeminiError = `${aiModel}: HTTP 404`; }
       }
       if (!rawText) {
         // Last resort: ask Google which models this key can actually use
@@ -315,7 +317,7 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
           diagInfo = `list-models HTTP ${lr.status}`;
         }
       }
-      if (!rawText) throw new Error(`No available Gemini model found for this API key ${diagInfo}`.trim());
+      if (!rawText) throw new Error(`No available Gemini model found for this API key ${lastGeminiError ? '| last: ' + lastGeminiError : ''} ${diagInfo}`.trim());
     }
 
     if (!rawText) throw new Error('Empty AI response');
