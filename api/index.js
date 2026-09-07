@@ -240,8 +240,9 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
       const j = await r.json();
       rawText = j.choices?.[0]?.message?.content;
     } else {
+      const aiModel = process.env.AI_MODEL || 'gemini-2.0-flash';
       const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${aiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${aiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
