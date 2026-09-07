@@ -204,6 +204,21 @@ async function init() {
         .subscribe((status) => {
           console.log("📡 Realtime Status:", status);
         });
+
+      // ── Live Presence: count of eco-warriors currently online ──
+      const presenceChannel = sbClient.channel('live-users', {
+        config: { presence: { key: Math.random().toString(36).slice(2) + Date.now() } }
+      });
+      presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+          const count = Object.keys(presenceChannel.presenceState()).length;
+          updatePresenceUI(count);
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await presenceChannel.track({ online_at: new Date().toISOString() });
+          }
+        });
     }
   } catch (err) {
     console.error("❌ Realtime subscription failed:", err);
@@ -273,6 +288,14 @@ function renderMapLeaderboard() {
     ${nearHtml}
     ${globalHtml}
   `;
+}
+
+// ── Live Presence UI ──
+function updatePresenceUI(count) {
+  const countEl = document.getElementById('presence-count');
+  if (countEl) countEl.textContent = count;
+  const pill = document.getElementById('presence-pill');
+  if (pill) pill.title = `${count} eco-warrior${count === 1 ? '' : 's'} online now`;
 }
 
 // ═══════════════════════════════════════════

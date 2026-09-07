@@ -1770,6 +1770,32 @@ html[data-theme="dark"] .theme-icon-dark { display: none; }
 .header-icon-btn:hover { background: var(--bg-hover); }
 .mobile-only { display: none; }
 
+/* ═════ Live Presence Pill (header) ═════ */
+.presence-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-main);
+  flex-shrink: 0;
+}
+.presence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  animation: presencePulse 2s ease-out infinite;
+}
+@keyframes presencePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55); }
+  100% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+}
+
 /* ═════ AI Triage Box ═════ */
 .ai-box {
   display: flex;
