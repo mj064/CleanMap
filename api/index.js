@@ -214,7 +214,7 @@ app.post('/api/ai/analyze', async (req, res) => {
   const AI_DEFAULTS = {
     gemini:     { model: null, baseUrl: null },
     groq:       { model: 'meta-llama/llama-4-scout-17b-16e-instruct', baseUrl: 'https://api.groq.com/openai/v1' },
-    openrouter: { model: 'meta-llama/llama-4-scout:free', baseUrl: 'https://openrouter.ai/api/v1' },
+    openrouter: { model: 'dots-studio/dots-3-note-preview:free', baseUrl: 'https://openrouter.ai/api/v1' },
     openai:     { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' }
   };
   if (!process.env.AI_PROVIDER) {
@@ -242,25 +242,52 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
     if (aiProvider === 'openai' || aiProvider === 'groq' || aiProvider === 'openrouter') {
       const defaults = AI_DEFAULTS[aiProvider] || AI_DEFAULTS.openai;
       const baseUrl = (process.env.AI_BASE_URL || defaults.baseUrl).replace(/\/$/, '');
-      const model = process.env.AI_MODEL || defaults.model;
-      const r = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
-        body: JSON.stringify({
-          model,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'text', text: systemPrompt },
-              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Data}` } }
-            ]
-          }],
-          max_tokens: 400
-        })
-      });
-      if (!r.ok) throw new Error(`${aiProvider} error ${r.status}`);
-      const j = await r.json();
-      rawText = j.choices?.[0]?.message?.content;
+      // Model chain — free-tier routers rotate their backing models, so try
+      // several until one returns usable content.
+      const modelChain = [
+        process.env.AI_MODEL,
+        defaults.model,
+        ...(aiProvider === 'openrouter' ? [
+          'openrouter/free',
+          'google/gemma-4-26b-a4b-it:free',
+          'google/gemma-4-31b-it:free'
+        ] : [])
+      ].filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
+
+      let lastErr = '';
+      const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+      for (const model of modelChain) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const r = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+            body: JSON.stringify({
+              model,
+              messages: [{
+                role: 'user',
+                content: [
+                  { type: 'text', text: systemPrompt },
+                  { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Data}` } }
+                ]
+              }],
+              max_tokens: 400
+            })
+          });
+          if (r.status === 429 && attempt === 0) {
+            // Rate-limited — wait briefly and retry the same model once
+            await sleep(5000);
+            continue;
+          }
+          if (!r.ok) { lastErr = `${aiProvider}/${model}: HTTP ${r.status}`; break; }
+          const j = await r.json();
+          const content = j.choices?.[0]?.message?.content;
+          if (content) { rawText = content; break; }
+          lastErr = `${aiProvider}/${model}: empty content`;
+          break;
+        }
+        if (rawText) break;
+      }
+      if (!rawText) throw new Error(`No working ${aiProvider} model. Last: ${lastErr}`);
     } else {
       // Fallback chain — try each model under BOTH API versions (v1 & v1beta).
       // Auth style depends on key format:
@@ -313,9 +340,11 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
 
     if (!rawText) throw new Error('Empty AI response');
 
-    // Strip possible markdown fences and parse
+    // Strip markdown fences and extract the JSON object — LLMs often add
+    // safety preambles or commentary around the payload
     const cleaned = rawText.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(cleaned);
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
 
     res.json({
       success: true,
