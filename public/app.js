@@ -369,7 +369,8 @@ navBtns.forEach(btn => {
 // ═══════════════════════════════════════════
 const mainMap = L.map('map', { zoomControl: false }).setView(CENTER, 14);
 mainTileLayer = createTileLayer(mainMap, currentMapStyle);
-L.control.zoom({ position: 'topright' }).addTo(mainMap);
+// Zoom controls live above the locate-me button (bottom-right of the map)
+L.control.zoom({ position: 'bottomright' }).addTo(mainMap);
 // Recompute the Nearby Leader card whenever the user pans/zooms the map
 mainMap.on('moveend', renderMapLeaderboard);
 
@@ -458,8 +459,13 @@ function renderMapMarkers() {
   }
 
   reports.forEach(r => {
+    // Main map: clicking the pin flies to it and opens the full details popup
     const mainMarker = L.marker([r.lat, r.lng], { icon: createIcon(r) })
-      .bindPopup(popupContent(r), { className: 'custom-popup' }).addTo(mainMap);
+      .on('click', () => {
+        mainMap.flyTo([r.lat, r.lng], Math.max(mainMap.getZoom(), 15), { duration: 0.8 });
+        openDetailPopup(mainMap, r);
+      })
+      .addTo(mainMap);
     mainMarkers[r.id] = mainMarker;
 
     if (typeof reportMap !== 'undefined' && reportMap) {
@@ -477,6 +483,13 @@ function detailHtml(r) {
   const statusLabel = t[`${r.status}_tab`] || r.status;
   const dateStr = new Date(r.created_at || r.date).toLocaleString();
 
+  let actions = '';
+  if (r.status === 'reported') {
+    actions = `<button class="btn btn-primary btn-block" style="margin-top:12px;" onclick="claimReport('${r.id}')"><i class="ph ph-handshake"></i> ${t.claim_task}</button>`;
+  } else if (r.status === 'in-progress') {
+    actions = `<button class="btn btn-secondary btn-block" style="margin-top:12px;" onclick="triggerProofModal('${r.id}')"><i class="ph ph-camera-plus"></i> ${t.upload_proof_btn}</button>`;
+  }
+
   return `
     ${generateBeforeAfterHtml(r)}
     <div class="popup-title">${t.details_title}</div>
@@ -493,6 +506,7 @@ function detailHtml(r) {
       <div><span>${t.on}</span><strong>${dateStr}</strong></div>
       <div><span>${t.coords}</span><strong>${(r.lat ?? 0).toFixed(5)}, ${(r.lng ?? 0).toFixed(5)}</strong></div>
     </div>
+    ${actions}
   `;
 }
 
@@ -643,7 +657,15 @@ document.getElementById('submit-proof-btn').addEventListener('click', async () =
   btn.disabled = true;
   btn.textContent = "Uploading...";
 
-  const photoBase64 = await compressImage(photoFile, 800);
+  let photoBase64;
+  try {
+    photoBase64 = await compressImage(photoFile, 800);
+  } catch (e) {
+    showToast(false, e.message);
+    btn.disabled = false;
+    btn.textContent = "Submit Proof";
+    return;
+  }
 
   try {
     const res = await fetch(`${API_BASE}/reports/${targetCleanId}/clean`, {
@@ -662,7 +684,7 @@ document.getElementById('submit-proof-btn').addEventListener('click', async () =
       showToast(false, `Upload error: ${data.error || 'Check Supabase Keys'}`);
     }
   } catch(e) {
-    showToast(false, 'Network failure or file too large.');
+    showToast(false, 'Upload failed — please try a smaller or different photo.');
   }
   btn.disabled = false;
   btn.textContent = "Submit Proof";
@@ -702,8 +724,9 @@ function renderReportCards() {
     const card = document.createElement('div');
     card.className = 'report-card';
     card.addEventListener('click', () => {
+      // Auto-focus the map and open the full report details
       mainMap.flyTo([r.lat, r.lng], 16, { duration: 1 });
-      setTimeout(() => mainMarkers[r.id]?.openPopup(), 600);
+      setTimeout(() => openDetailPopup(mainMap, r), 650);
     });
 
     const dateStr = new Date(r.created_at || r.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
@@ -921,20 +944,42 @@ function checkFormValidity() {
 document.getElementById('report-title').addEventListener('input', checkFormValidity);
 document.getElementById('report-location').addEventListener('input', checkFormValidity);
 
-function compressImage(file, maxWidth = 800) {
-  return new Promise((resolve) => {
+function compressImage(file, maxWidth = 800, maxBytes = 2 * 1024 * 1024) {
+  // Iteratively compresses until the result fits comfortably under Vercel's
+  // 4.5MB request-body limit, with hard error handling for unreadable files.
+  return new Promise((resolve, reject) => {
     if (!file) return resolve(null);
     const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the file. Try a different photo.'));
     reader.readAsDataURL(file);
     reader.onload = (event) => {
-      const img = new Image(); img.src = event.target.result;
+      const img = new Image();
+      img.onerror = () => reject(new Error('Unsupported image format — please use a JPG or PNG.'));
+      img.src = event.target.result;
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width, height = img.height;
-        if (width > maxWidth) { height = Math.round(height * (maxWidth / width)); width = maxWidth; }
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.6));
+        try {
+          const canvas = document.createElement('canvas');
+          let width = img.width, height = img.height, quality = 0.6;
+          if (width > maxWidth) { height = Math.round(height * (maxWidth / width)); width = maxWidth; }
+          canvas.width = width; canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          let out = canvas.toDataURL('image/jpeg', quality);
+          // Shrink quality, then dimensions, until well under the size cap
+          while (out.length * 0.75 > maxBytes && quality > 0.3) {
+            quality -= 0.15;
+            out = canvas.toDataURL('image/jpeg', quality);
+          }
+          while (out.length * 0.75 > maxBytes && width > 320) {
+            width = Math.round(width * 0.7);
+            height = Math.round(height * 0.7);
+            canvas.width = width; canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            out = canvas.toDataURL('image/jpeg', 0.5);
+          }
+          resolve(out);
+        } catch (err) {
+          reject(new Error('Could not process the image. Try a different photo.'));
+        }
       };
     };
   });
@@ -1010,7 +1055,15 @@ document.getElementById('submit-report').addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = 'Processing...';
 
   const photoFile = document.getElementById('report-photo').files[0];
-  const photoBase64 = await compressImage(photoFile);
+  let photoBase64;
+  try {
+    photoBase64 = await compressImage(photoFile, 800);
+  } catch (e) {
+    showToast(false, e.message);
+    btn.disabled = false; btn.textContent = 'Submit into System';
+    checkFormValidity();
+    return;
+  }
 
   const reportData = {
     title: document.getElementById('report-title').value.trim(),
