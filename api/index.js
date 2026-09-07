@@ -252,7 +252,9 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
       //   "AIza…" (classic API key)   → x-goog-api-key header
       //   "AQ.…"  (new AI Studio key) → Authorization: Bearer
       // If the primary style is blocked, the alternate is tried before giving up.
-      const models = [process.env.AI_MODEL, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+      // Chain starts with the always-current alias, then newest generations —
+      // older models are retired for newly-created keys.
+      const models = [process.env.AI_MODEL, 'gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
         .filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
       const versions = ['v1beta', 'v1'];
       const primaryAuth = aiKey.startsWith('AQ.')
