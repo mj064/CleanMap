@@ -38,6 +38,8 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     supabase_configured: !!supabase,
+    service_key_configured: !!serviceKey,
+    ai_configured: !!process.env.AI_API_KEY,
     env: process.env.NODE_ENV
   });
 });
@@ -77,7 +79,8 @@ app.get('/api/reports', async (req, res) => {
 
 // POST a new report (with Cloud Storage for Photo)
 app.post('/api/reports', async (req, res) => {
-  const { title, location, description, severity, lat, lng, reporter, user_id, photoBase64 } = req.body;
+  const { title, location, description, severity, lat, lng, reporter, user_id, photoBase64,
+          ai_category, ai_severity, ai_summary } = req.body;
 
   let photoUrl = null;
 
@@ -113,7 +116,10 @@ app.post('/api/reports', async (req, res) => {
     title, location, description, severity, lat, lng, reporter,
     photo: photoUrl,
     status: 'reported',
-    ...(user_id ? { user_id } : {})
+    ...(user_id ? { user_id } : {}),
+    ...(ai_category ? { ai_category } : {}),
+    ...(ai_severity ? { ai_severity } : {}),
+    ...(ai_summary ? { ai_summary } : {})
   };
 
   if (!supabase) return res.status(500).json({ success: false, error: "Database not connected" });
@@ -190,6 +196,91 @@ app.patch('/api/reports/:id/clean', async (req, res) => {
 
   if (error) return res.status(500).json({ success: false, error: error.message });
   res.json({ success: true, data });
+});
+
+// POST: AI vision triage of an evidence photo.
+// Supports Gemini (default) or OpenAI. Requires AI_API_KEY in env.
+app.post('/api/ai/analyze', async (req, res) => {
+  const { photoBase64 } = req.body;
+  if (!photoBase64) return res.status(400).json({ success: false, error: 'photoBase64 is required' });
+
+  const aiKey = process.env.AI_API_KEY;
+  const aiProvider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
+  if (!aiKey) {
+    return res.status(503).json({ success: false, error: 'AI not configured (set AI_API_KEY)' });
+  }
+
+  const base64Data = photoBase64.replace(/^data:image\/\w+;base64,/, '');
+  const systemPrompt = `You are a waste-report triage assistant for a community cleanup platform.
+Analyze the attached photo of an alleged waste/dumping site.
+Respond with ONLY a valid JSON object (no markdown, no extra text) with exactly these keys:
+{"is_waste": boolean, "category": "plastic"|"organic"|"e-waste"|"construction"|"hazardous"|"other", "severity": "low"|"medium"|"high", "suggested_title": string (max 60 chars, concise report title), "suggested_description": string (max 200 chars, what is visible and why it matters), "confidence": number between 0 and 1}
+If the photo contains no waste, set is_waste false and keep other fields minimal.`;
+
+  try {
+    let rawText = null;
+
+    if (aiProvider === 'openai') {
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: systemPrompt },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Data}` } }
+            ]
+          }],
+          max_tokens: 400
+        })
+      });
+      if (!r.ok) throw new Error(`OpenAI error ${r.status}`);
+      const j = await r.json();
+      rawText = j.choices?.[0]?.message?.content;
+    } else {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${aiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: systemPrompt },
+                { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+              ]
+            }]
+          })
+        }
+      );
+      if (!r.ok) throw new Error(`Gemini error ${r.status}`);
+      const j = await r.json();
+      rawText = j.candidates?.[0]?.content?.parts?.[0]?.text;
+    }
+
+    if (!rawText) throw new Error('Empty AI response');
+
+    // Strip possible markdown fences and parse
+    const cleaned = rawText.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+
+    res.json({
+      success: true,
+      data: {
+        is_waste: !!parsed.is_waste,
+        category: parsed.category || 'other',
+        severity: parsed.severity || 'medium',
+        suggested_title: parsed.suggested_title || '',
+        suggested_description: parsed.suggested_description || '',
+        confidence: Number(parsed.confidence) || 0
+      }
+    });
+  } catch (err) {
+    console.error('AI analyze failed:', err.message);
+    res.status(500).json({ success: false, error: `AI analysis failed: ${err.message}` });
+  }
 });
 
 // GET Dash Stats

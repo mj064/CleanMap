@@ -917,12 +917,15 @@ function compressImage(file, maxWidth = 800) {
   });
 }
 
-// ── Photo previews (before choosing to upload) ──
+// ── Photo previews (before choosing to upload) + AI triage ──
+let aiSuggestions = null;
+
 document.getElementById('report-photo').addEventListener('change', (e) => {
   const preview = document.getElementById('photo-preview');
   const file = e.target.files[0];
   if (file) { preview.src = URL.createObjectURL(file); preview.style.display = 'block'; }
   else preview.style.display = 'none';
+  runAiTriage(file);
 });
 document.getElementById('after-photo').addEventListener('change', (e) => {
   const preview = document.getElementById('after-preview');
@@ -930,6 +933,54 @@ document.getElementById('after-photo').addEventListener('change', (e) => {
   if (file) { preview.src = URL.createObjectURL(file); preview.style.display = 'block'; }
   else preview.style.display = 'none';
 });
+
+// 🤖 AI triage: analyze the chosen evidence photo and offer one-tap form fill
+async function runAiTriage(file) {
+  const box = document.getElementById('ai-box');
+  if (!file) { aiSuggestions = null; box.style.display = 'none'; return; }
+
+  box.style.display = 'flex';
+  box.innerHTML = '<i class="ph ph-circle-notch ai-spin"></i> 🤖 AI is analyzing the photo…';
+
+  try {
+    const b64 = await compressImage(file, 640);
+    const res = await fetch(`${API_BASE}/ai/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photoBase64: b64 })
+    });
+    const data = await res.json();
+
+    if (data.success && data.data.is_waste) {
+      aiSuggestions = data.data;
+      const pct = Math.round(data.data.confidence * 100);
+      box.innerHTML =
+        `<i class="ph ph-robot"></i> <strong>AI:</strong> ${data.data.category} · ${data.data.severity} severity · ${pct}% confident` +
+        ` — <button type="button" class="btn-text" id="ai-apply">Apply suggestions</button>`;
+      document.getElementById('ai-apply').addEventListener('click', () => {
+        if (data.data.suggested_title) document.getElementById('report-title').value = data.data.suggested_title;
+        if (data.data.suggested_description) document.getElementById('report-desc').value = data.data.suggested_description;
+        if (['low', 'medium', 'high'].includes(data.data.severity)) {
+          document.querySelectorAll('.sev-opt').forEach(o => o.classList.remove('selected'));
+          const opt = document.querySelector(`.sev-opt[data-sev="${data.data.severity}"]`);
+          if (opt) { opt.classList.add('selected'); selectedSeverity = data.data.severity; }
+        }
+        document.getElementById('report-title').dispatchEvent(new Event('input'));
+        checkFormValidity();
+      });
+    } else if (data.success && !data.data.is_waste) {
+      aiSuggestions = null;
+      box.innerHTML = '<i class="ph ph-robot"></i> 🤖 AI: this photo doesn\'t appear to show waste — double-check before filing.';
+    } else {
+      // AI not configured or failed — stay silent, the form works perfectly without it
+      aiSuggestions = null;
+      box.style.display = 'none';
+    }
+  } catch (err) {
+    aiSuggestions = null;
+    box.style.display = 'none';
+  }
+}
 
 document.getElementById('submit-report').addEventListener('click', async () => {
   const btn = document.getElementById('submit-report');
@@ -948,6 +999,11 @@ document.getElementById('submit-report').addEventListener('click', async () => {
       ? (currentUser.user_metadata?.name || currentUser.email?.split('@')[0] || 'Volunteer')
       : (document.getElementById('report-reporter').value.trim() || 'Anonymous'),
     user_id: currentUser?.id || null,
+    ...(aiSuggestions ? {
+      ai_category: aiSuggestions.category,
+      ai_severity: aiSuggestions.severity,
+      ai_summary: aiSuggestions.suggested_description
+    } : {}),
     photoBase64: photoBase64
   };
 
