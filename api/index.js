@@ -247,40 +247,51 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
       const j = await r.json();
       rawText = j.choices?.[0]?.message?.content;
     } else {
-      // Fallback chain — try each model under BOTH API versions (v1 & v1beta),
-      // since newer Gemini models aren't always served on v1beta.
+      // Fallback chain — try each model under BOTH API versions (v1 & v1beta).
+      // Auth style depends on key format:
+      //   "AIza…" (classic API key)   → x-goog-api-key header
+      //   "AQ.…"  (new AI Studio key) → Authorization: Bearer
+      // If the primary style is blocked, the alternate is tried before giving up.
       const models = [process.env.AI_MODEL, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
         .filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
       const versions = ['v1beta', 'v1'];
+      const primaryAuth = aiKey.startsWith('AQ.')
+        ? { 'Authorization': `Bearer ${aiKey}` }
+        : { 'x-goog-api-key': aiKey };
+      const altAuth = aiKey.startsWith('AQ.')
+        ? { 'x-goog-api-key': aiKey }
+        : { 'Authorization': `Bearer ${aiKey}` };
 
       outer:
       for (const aiModel of models) {
         for (const ver of versions) {
-          const r = await fetch(
-            `https://generativelanguage.googleapis.com/${ver}/models/${aiModel}:generateContent`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': aiKey },
-              body: JSON.stringify({
-                contents: [{
-                  parts: [
-                    { text: systemPrompt },
-                    { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
-                  ]
-                }]
-              })
+          for (const headers of [primaryAuth, altAuth]) {
+            const r = await fetch(
+              `https://generativelanguage.googleapis.com/${ver}/models/${aiModel}:generateContent`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...headers },
+                body: JSON.stringify({
+                  contents: [{
+                    parts: [
+                      { text: systemPrompt },
+                      { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+                    ]
+                  }]
+                })
+              }
+            );
+            if (r.ok) {
+              const j = await r.json();
+              rawText = j.candidates?.[0]?.content?.parts?.[0]?.text;
+              break outer;
             }
-          );
-          if (r.ok) {
-            const j = await r.json();
-            rawText = j.candidates?.[0]?.content?.parts?.[0]?.text;
-            break outer;
+            if (r.status !== 404 && r.status !== 401 && r.status !== 403) throw new Error(`Gemini error ${r.status}`);
+            try { const eb = await r.json(); lastGeminiError = `${ver}/${aiModel}: ${eb?.error?.message || r.status}`; } catch { lastGeminiError = `${ver}/${aiModel}: HTTP ${r.status}`; }
           }
-          if (r.status !== 404) throw new Error(`Gemini error ${r.status}`);
-          try { const eb = await r.json(); lastGeminiError = `${ver}/${aiModel}: ${eb?.error?.message || '404'}`; } catch { lastGeminiError = `${ver}/${aiModel}: HTTP 404`; }
         }
       }
-      if (!rawText) throw new Error(`No working Gemini model found ${lastGeminiError ? '| last: ' + lastGeminiError : ''}`.trim());
+      if (!rawText) throw new Error(`No working Gemini auth/model combination. Last: ${lastGeminiError}`.trim());
     }
 
     if (!rawText) throw new Error('Empty AI response');
