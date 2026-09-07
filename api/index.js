@@ -206,10 +206,22 @@ app.post('/api/ai/analyze', async (req, res) => {
 
   const aiKey = process.env.AI_API_KEY;
   let aiProvider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
-  // Auto-detect provider from key format: OpenAI keys start with "sk-", Google's with "AIza"
+  // Auto-detect provider from key format:
+  //   "AIza…"  → Google Gemini  |  "AQ.…"   → new-format Google AI Studio key
+  //   "gsk_…"  → Groq (free tier, vision-capable Llama-4-Scout)
+  //   "sk-or…" → OpenRouter (has :free models)
+  //   "sk-…"   → OpenAI
+  const AI_DEFAULTS = {
+    gemini:     { model: null, baseUrl: null },
+    groq:       { model: 'meta-llama/llama-4-scout-17b-16e-instruct', baseUrl: 'https://api.groq.com/openai/v1' },
+    openrouter: { model: 'meta-llama/llama-4-scout:free', baseUrl: 'https://openrouter.ai/api/v1' },
+    openai:     { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' }
+  };
   if (!process.env.AI_PROVIDER) {
-    if (aiKey.startsWith('sk-')) aiProvider = 'openai';
-    else if (aiKey.startsWith('AIza')) aiProvider = 'gemini';
+    if (aiKey.startsWith('gsk_')) aiProvider = 'groq';
+    else if (aiKey.startsWith('sk-or-')) aiProvider = 'openrouter';
+    else if (aiKey.startsWith('sk-')) aiProvider = 'openai';
+    else if (aiKey.startsWith('AIza') || aiKey.startsWith('AQ.')) aiProvider = 'gemini';
   }
   if (!aiKey) {
     return res.status(503).json({ success: false, error: 'AI not configured (set AI_API_KEY)' });
@@ -227,12 +239,15 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
     let diagInfo = '';
     let lastGeminiError = '';
 
-    if (aiProvider === 'openai') {
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    if (aiProvider === 'openai' || aiProvider === 'groq' || aiProvider === 'openrouter') {
+      const defaults = AI_DEFAULTS[aiProvider] || AI_DEFAULTS.openai;
+      const baseUrl = (process.env.AI_BASE_URL || defaults.baseUrl).replace(/\/$/, '');
+      const model = process.env.AI_MODEL || defaults.model;
+      const r = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model,
           messages: [{
             role: 'user',
             content: [
@@ -243,7 +258,7 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
           max_tokens: 400
         })
       });
-      if (!r.ok) throw new Error(`OpenAI error ${r.status}`);
+      if (!r.ok) throw new Error(`${aiProvider} error ${r.status}`);
       const j = await r.json();
       rawText = j.choices?.[0]?.message?.content;
     } else {
