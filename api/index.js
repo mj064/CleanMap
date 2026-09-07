@@ -240,25 +240,35 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
       const j = await r.json();
       rawText = j.choices?.[0]?.message?.content;
     } else {
-      const aiModel = process.env.AI_MODEL || 'gemini-2.0-flash';
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${aiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: systemPrompt },
-                { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
-              ]
-            }]
-          })
+      // Fallback chain — Google retires model names; try newest first
+      const models = [process.env.AI_MODEL, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+        .filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
+
+      for (const aiModel of models) {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${aiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: systemPrompt },
+                  { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+                ]
+              }]
+            })
+          }
+        );
+        if (r.ok) {
+          const j = await r.json();
+          rawText = j.candidates?.[0]?.content?.parts?.[0]?.text;
+          break;
         }
-      );
-      if (!r.ok) throw new Error(`Gemini error ${r.status}`);
-      const j = await r.json();
-      rawText = j.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (r.status !== 404) throw new Error(`Gemini error ${r.status}`);
+        // 404 = model not available for this key → try next in chain
+      }
+      if (!rawText) throw new Error('No available Gemini model found for this API key');
     }
 
     if (!rawText) throw new Error('Empty AI response');
