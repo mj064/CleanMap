@@ -257,10 +257,10 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
       for (const aiModel of models) {
         for (const ver of versions) {
           const r = await fetch(
-            `https://generativelanguage.googleapis.com/${ver}/models/${aiModel}:generateContent?key=${aiKey}`,
+            `https://generativelanguage.googleapis.com/${ver}/models/${aiModel}:generateContent`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': aiKey },
               body: JSON.stringify({
                 contents: [{
                   parts: [
