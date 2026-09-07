@@ -205,7 +205,12 @@ app.post('/api/ai/analyze', async (req, res) => {
   if (!photoBase64) return res.status(400).json({ success: false, error: 'photoBase64 is required' });
 
   const aiKey = process.env.AI_API_KEY;
-  const aiProvider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
+  let aiProvider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
+  // Auto-detect provider from key format: OpenAI keys start with "sk-", Google's with "AIza"
+  if (!process.env.AI_PROVIDER) {
+    if (aiKey.startsWith('sk-')) aiProvider = 'openai';
+    else if (aiKey.startsWith('AIza')) aiProvider = 'gemini';
+  }
   if (!aiKey) {
     return res.status(503).json({ success: false, error: 'AI not configured (set AI_API_KEY)' });
   }
@@ -219,6 +224,7 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
 
   try {
     let rawText = null;
+    let diagInfo = '';
 
     if (aiProvider === 'openai') {
       const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -299,9 +305,11 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
               rawText = j2.candidates?.[0]?.content?.parts?.[0]?.text;
             }
           }
+        } else {
+          diagInfo = `list-models HTTP ${lr.status}`;
         }
       }
-      if (!rawText) throw new Error('No available Gemini model found for this API key');
+      if (!rawText) throw new Error(`No available Gemini model found for this API key ${diagInfo}`.trim());
     }
 
     if (!rawText) throw new Error('Empty AI response');
