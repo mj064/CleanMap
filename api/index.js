@@ -268,6 +268,39 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
         if (r.status !== 404) throw new Error(`Gemini error ${r.status}`);
         // 404 = model not available for this key → try next in chain
       }
+      if (!rawText) {
+        // Last resort: ask Google which models this key can actually use
+        const lr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${aiKey}&pageSize=50`);
+        if (lr.ok) {
+          const lm = await lr.json();
+          const candidate = (lm.models || []).find(m =>
+            (m.supportedGenerationMethods || []).includes('generateContent') &&
+            /flash/i.test(m.name) && !/embedding|tts|image/i.test(m.name)
+          );
+          if (candidate) {
+            const name = candidate.name.replace(/^models\//, '');
+            const r2 = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${name}:generateContent?key=${aiKey}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{
+                    parts: [
+                      { text: systemPrompt },
+                      { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+                    ]
+                  }]
+                })
+              }
+            );
+            if (r2.ok) {
+              const j2 = await r2.json();
+              rawText = j2.candidates?.[0]?.content?.parts?.[0]?.text;
+            }
+          }
+        }
+      }
       if (!rawText) throw new Error('No available Gemini model found for this API key');
     }
 
