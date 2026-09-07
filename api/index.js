@@ -247,77 +247,40 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
       const j = await r.json();
       rawText = j.choices?.[0]?.message?.content;
     } else {
-      // Fallback chain — Google retires model names; try newest first
+      // Fallback chain — try each model under BOTH API versions (v1 & v1beta),
+      // since newer Gemini models aren't always served on v1beta.
       const models = [process.env.AI_MODEL, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
         .filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
+      const versions = ['v1beta', 'v1'];
 
+      outer:
       for (const aiModel of models) {
-        const r = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${aiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{
-                parts: [
-                  { text: systemPrompt },
-                  { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
-                ]
-              }]
-            })
-          }
-        );
-        if (r.ok) {
-          const j = await r.json();
-          rawText = j.candidates?.[0]?.content?.parts?.[0]?.text;
-          break;
-        }
-        if (r.status !== 404) throw new Error(`Gemini error ${r.status}`);
-        // 404 = model not available for this key → remember why, try next in chain
-        try { const eb = await r.json(); lastGeminiError = `${aiModel}: ${eb?.error?.message || '404'}`; } catch { lastGeminiError = `${aiModel}: HTTP 404`; }
-      }
-      if (!rawText) {
-        // Last resort: ask Google which models this key can actually use
-        const lr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${aiKey}&pageSize=50`);
-        if (lr.ok) {
-          const lm = await lr.json();
-          const candidate = (lm.models || []).find(m =>
-            (m.supportedGenerationMethods || []).includes('generateContent') &&
-            /flash/i.test(m.name) && !/embedding|tts|image/i.test(m.name)
-          );
-          if (candidate) {
-            const name = candidate.name.replace(/^models\//, '');
-            const r2 = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${name}:generateContent?key=${aiKey}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{
-                    parts: [
-                      { text: systemPrompt },
-                      { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
-                    ]
-                  }]
-                })
-              }
-            );
-            if (r2.ok) {
-              const j2 = await r2.json();
-              rawText = j2.candidates?.[0]?.content?.parts?.[0]?.text;
-            } else {
-              diagInfo = `(discovered model ${name} returned HTTP ${r2.status})`;
+        for (const ver of versions) {
+          const r = await fetch(
+            `https://generativelanguage.googleapis.com/${ver}/models/${aiModel}:generateContent?key=${aiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    { text: systemPrompt },
+                    { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+                  ]
+                }]
+              })
             }
-          } else {
-            // Nothing matched — surface what Google actually returned for debugging
-            const names = (lm.models || []).map(m => m.name).slice(0, 8).join(', ');
-            diagInfo = `(models returned: ${names || 'NONE'})`;
+          );
+          if (r.ok) {
+            const j = await r.json();
+            rawText = j.candidates?.[0]?.content?.parts?.[0]?.text;
+            break outer;
           }
-        } else {
-          diagInfo = `list-models HTTP ${lr.status}`;
+          if (r.status !== 404) throw new Error(`Gemini error ${r.status}`);
+          try { const eb = await r.json(); lastGeminiError = `${ver}/${aiModel}: ${eb?.error?.message || '404'}`; } catch { lastGeminiError = `${ver}/${aiModel}: HTTP 404`; }
         }
       }
-      if (!rawText) throw new Error(`No available Gemini model found for this API key ${lastGeminiError ? '| last: ' + lastGeminiError : ''} ${diagInfo}`.trim());
+      if (!rawText) throw new Error(`No working Gemini model found ${lastGeminiError ? '| last: ' + lastGeminiError : ''}`.trim());
     }
 
     if (!rawText) throw new Error('Empty AI response');
