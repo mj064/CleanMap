@@ -304,6 +304,10 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
               const j2 = await r2.json();
               rawText = j2.candidates?.[0]?.content?.parts?.[0]?.text;
             }
+          } else {
+            // Nothing matched — surface what Google actually returned for debugging
+            const names = (lm.models || []).map(m => m.name).slice(0, 8).join(', ');
+            diagInfo = `(models returned: ${names || 'NONE'})`;
           }
         } else {
           diagInfo = `list-models HTTP ${lr.status}`;
