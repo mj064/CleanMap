@@ -482,6 +482,11 @@ function detailHtml(r) {
   const sevLabel = t[r.severity] || r.severity;
   const statusLabel = t[`${r.status}_tab`] || r.status;
   const dateStr = new Date(r.created_at || r.date).toLocaleString();
+  const verified = (r.status === 'cleaned' && r.ai_verified === true)
+    ? `<span class="ai-verified-badge"><i class="ph ph-robot"></i> AI-Verified ✓</span> `
+    : (r.status === 'cleaned' && r.ai_verified === false)
+      ? `<span class="ai-unverified-badge" title="AI compared before/after photos and could not confirm this cleanup"><i class="ph ph-shield-warning"></i> Unverified</span> `
+      : '';
 
   let actions = '';
   if (r.status === 'reported') {
@@ -493,7 +498,7 @@ function detailHtml(r) {
   return `
     ${generateBeforeAfterHtml(r)}
     <div class="popup-title">${t.details_title}</div>
-    <div class="detail-heading">${r.title}</div>
+    <div class="detail-heading">${verified}${r.title}</div>
     <div class="popup-loc"><i class="ph ph-map-pin"></i> ${r.location}</div>
     <div class="popup-desc">${r.description || 'No description provided.'}</div>
     <div style="margin-bottom:4px;">
@@ -675,7 +680,13 @@ document.getElementById('submit-proof-btn').addEventListener('click', async () =
     });
     const data = await res.json();
     if (data.success) {
-      showToast(true, translations[currentLang].proof_accepted || 'Report filed successfully!');
+      if (data.aiVerified === true) {
+        showToast(true, '🤖 AI verified your cleanup! ✓');
+      } else if (data.aiVerified === false) {
+        showToast(false, '🤖 AI could not confirm the cleanup — a moderator will review.');
+      } else {
+        showToast(true, translations[currentLang].proof_accepted || 'Report filed successfully!');
+      }
       resetForm();
       // Force immediate local refresh for instant feedback
       refreshAllQuietly();
@@ -741,10 +752,13 @@ function renderReportCards() {
 
     const sevLabel = t[r.severity] || r.severity;
     const statusLabel = t[`${r.status}_tab`] || r.status;
+    const verifiedBadge = (r.status === 'cleaned' && r.ai_verified === true)
+      ? `<span class="ai-verified-badge" title="AI compared before/after photos and confirmed this cleanup"><i class="ph ph-robot"></i> ✓</span>`
+      : '';
 
     card.innerHTML = `
       <div class="card-top">
-        <div class="card-title">${r.title}</div>
+        <div class="card-title">${r.title} ${verifiedBadge}</div>
         <div class="badge sev-${r.severity}"><span class="badge-dot"></span>${sevLabel}</div>
       </div>
       <div class="card-loc"><i class="ph ph-map-pin-line"></i> ${r.location}</div>

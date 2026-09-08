@@ -23,6 +23,22 @@ const supabase = (supabaseUrl && anonKey)
   ? createClient(supabaseUrl, serviceKey || anonKey)
   : null;
 
+// AI provider defaults — auto-selected by key prefix in /api/ai/analyze
+const AI_DEFAULTS = {
+  gemini:     { model: null, baseUrl: null },
+  groq:       { model: 'meta-llama/llama-4-scout-17b-16e-instruct', baseUrl: 'https://api.groq.com/openai/v1' },
+  openrouter: { model: 'dots-studio/dots-3-note-preview:free', baseUrl: 'https://openrouter.ai/api/v1' },
+  openai:     { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' }
+};
+
+function detectAiProvider(key) {
+  if (key.startsWith('gsk_')) return 'groq';
+  if (key.startsWith('sk-or-')) return 'openrouter';
+  if (key.startsWith('sk-')) return 'openai';
+  if (key.startsWith('AIza') || key.startsWith('AQ.')) return 'gemini';
+  return 'gemini';
+}
+
 // ── Middleware ──
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -187,15 +203,31 @@ app.patch('/api/reports/:id/clean', async (req, res) => {
 
   if (!supabase) return res.status(500).json({ success: false, error: "Database not connected" });
 
+  // 🤖 AI verification: compare before/after photos before marking verified
+  let aiVerified = null;
+  try {
+    const { data: existing } = await supabase
+      .from('reports')
+      .select('photo')
+      .eq('id', id)
+      .single();
+    if (afterPhotoUrl && existing?.photo) {
+      const verdict = await verifyCleanupAI(existing.photo, afterPhotoUrl);
+      if (verdict) aiVerified = verdict.cleaned;
+    }
+  } catch (e) {
+    console.error('AI verification skipped:', e.message);
+  }
+
   const { data, error } = await supabase
     .from('reports')
-    .update({ status: 'cleaned', after_photo: afterPhotoUrl })
+    .update({ status: 'cleaned', after_photo: afterPhotoUrl, ...(aiVerified !== null ? { ai_verified: aiVerified } : {}) })
     .eq('id', id)
     .select()
     .single();
 
   if (error) return res.status(500).json({ success: false, error: error.message });
-  res.json({ success: true, data });
+  res.json({ success: true, data, aiVerified });
 });
 
 // POST: AI vision triage of an evidence photo.
@@ -205,23 +237,9 @@ app.post('/api/ai/analyze', async (req, res) => {
   if (!photoBase64) return res.status(400).json({ success: false, error: 'photoBase64 is required' });
 
   const aiKey = process.env.AI_API_KEY;
-  let aiProvider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
-  // Auto-detect provider from key format:
-  //   "AIza…"  → Google Gemini  |  "AQ.…"   → new-format Google AI Studio key
-  //   "gsk_…"  → Groq (free tier, vision-capable Llama-4-Scout)
-  //   "sk-or…" → OpenRouter (has :free models)
-  //   "sk-…"   → OpenAI
-  const AI_DEFAULTS = {
-    gemini:     { model: null, baseUrl: null },
-    groq:       { model: 'meta-llama/llama-4-scout-17b-16e-instruct', baseUrl: 'https://api.groq.com/openai/v1' },
-    openrouter: { model: 'dots-studio/dots-3-note-preview:free', baseUrl: 'https://openrouter.ai/api/v1' },
-    openai:     { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' }
-  };
+  let aiProvider = (process.env.AI_PROVIDER || detectAiProvider(aiKey)).toLowerCase();
   if (!process.env.AI_PROVIDER) {
-    if (aiKey.startsWith('gsk_')) aiProvider = 'groq';
-    else if (aiKey.startsWith('sk-or-')) aiProvider = 'openrouter';
-    else if (aiKey.startsWith('sk-')) aiProvider = 'openai';
-    else if (aiKey.startsWith('AIza') || aiKey.startsWith('AQ.')) aiProvider = 'gemini';
+    aiProvider = detectAiProvider(aiKey);
   }
   if (!aiKey) {
     return res.status(503).json({ success: false, error: 'AI not configured (set AI_API_KEY)' });
@@ -362,6 +380,87 @@ If the photo contains no waste, set is_waste false and keep other fields minimal
     res.status(500).json({ success: false, error: `AI analysis failed: ${err.message}` });
   }
 });
+
+// GET Dash Stats
+// ── AI cleanup verification: compare before/after photos ──
+async function verifyCleanupAI(beforeUrl, afterUrl) {
+  const aiKey = process.env.AI_API_KEY;
+  if (!aiKey || !beforeUrl || !afterUrl) return null;
+  const provider = detectAiProvider(aiKey);
+  const defaults = AI_DEFAULTS[provider] || AI_DEFAULTS.gemini;
+  const prompt = `You are verifying a community cleanup. Image 1 is BEFORE (waste present). Image 2 is AFTER (claimed cleaned) — same location.
+Did the waste actually get cleaned up? Reply ONLY valid JSON (no markdown): {"cleaned": boolean, "confidence": 0-1, "note": "max 120 chars"}`;
+
+  try {
+    const [bRes, aRes] = await Promise.all([fetch(beforeUrl), fetch(afterUrl)]);
+    if (!bRes.ok || !aRes.ok) return null;
+    const b64b = Buffer.from(await bRes.arrayBuffer()).toString('base64');
+    const b64a = Buffer.from(await aRes.arrayBuffer()).toString('base64');
+    let rawText = null;
+
+    if (provider === 'gemini') {
+      const models = [process.env.AI_MODEL, 'gemini-flash-latest', 'gemini-3.5-flash', 'gemini-2.5-flash']
+        .filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
+      const headers = aiKey.startsWith('AQ.')
+        ? { 'Authorization': `Bearer ${aiKey}` }
+        : { 'x-goog-api-key': aiKey };
+      outer:
+      for (const m of models) {
+        for (const ver of ['v1beta', 'v1']) {
+          const r = await fetch(`https://generativelanguage.googleapis.com/${ver}/models/${m}:generateContent`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: prompt },
+                  { inline_data: { mime_type: 'image/jpeg', data: b64b } },
+                  { inline_data: { mime_type: 'image/jpeg', data: b64a } }
+                ]
+              }]
+            })
+          });
+          if (r.ok) {
+            const j = await r.json();
+            rawText = j.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (rawText) break outer;
+          }
+        }
+      }
+    } else {
+      const baseUrl = (process.env.AI_BASE_URL || defaults.baseUrl).replace(/\/$/, '');
+      const r = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+        body: JSON.stringify({
+          model: process.env.AI_MODEL || defaults.model,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: beforeUrl } },
+              { type: 'image_url', image_url: { url: afterUrl } }
+            ]
+          }],
+          max_tokens: 300
+        })
+      });
+      if (r.ok) {
+        const j = await r.json();
+        rawText = j.choices?.[0]?.message?.content;
+      }
+    }
+
+    if (!rawText) return null;
+    const jsonMatch = rawText.replace(/```json|```/g, '').match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]);
+    return { cleaned: !!parsed.cleaned, confidence: Number(parsed.confidence) || 0, note: parsed.note || '' };
+  } catch (err) {
+    console.error('verifyCleanupAI failed:', err.message);
+    return null;
+  }
+}
 
 // GET Dash Stats
 app.get('/api/stats', async (req, res) => {
