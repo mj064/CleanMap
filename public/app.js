@@ -523,6 +523,7 @@ function detailHtml(r) {
     <div class="detail-rows">
       <div><span>${t.filed_by}</span><strong>${r.reporter}</strong></div>
       ${r.volunteer ? `<div><span>Volunteer</span><strong>${r.volunteer}</strong></div>` : ''}
+      ${r.group_name ? `<div><span>Group</span><strong><span class="group-chip"><i class="ph ph-users-three"></i> ${r.group_name}</span></strong></div>` : ''}
       <div><span>${t.on}</span><strong>${dateStr}</strong></div>
       <div><span>${t.coords}</span><strong>${(r.lat ?? 0).toFixed(5)}, ${(r.lng ?? 0).toFixed(5)}</strong></div>
     </div>
@@ -861,6 +862,11 @@ searchClear.addEventListener('click', async () => {
 // ═══════════════════════════════════════════
 async function renderDashboard() {
   const t = translations[currentLang];
+  // Skeleton shimmer while stats load (instead of a blank card)
+  const statsGrid = document.getElementById('stats-grid');
+  if (statsGrid && !statsGrid.innerHTML.includes('stat-card')) {
+    statsGrid.innerHTML = `<div class="skeleton skel-stat"></div>`.repeat(4);
+  }
   let stats;
   try {
     stats = await (await fetch(`${API_BASE}/stats`)).json();
@@ -1296,10 +1302,11 @@ function computeBoardStats() {
 function boardRowHTML(idx, name, points, count, verified) {
   const medals = ['🥇', '🥈', '🥉'];
   const rank = idx < 3 ? medals[idx] : `#${idx + 1}`;
+  const isMe = currentUser && name === displayName();
   return `
-    <div class="lb-row">
+    <div class="lb-row${isMe ? ' lb-row-me' : ''}">
       <div class="lb-rank">${rank}</div>
-      <div class="lb-name">${name}${verified ? ` <span class="ai-verified-badge"><i class="ph ph-robot"></i> ${verified}</span>` : ''}</div>
+      <div class="lb-name">${name}${isMe ? '<span class="you-chip">YOU</span>' : ''}${verified ? ` <span class="ai-verified-badge"><i class="ph ph-robot"></i> ${verified}</span>` : ''}</div>
       <div class="lb-score">
         <span class="lb-count">${count} cleaned</span>
         <span class="lb-points">${points} PTS</span>
@@ -1324,9 +1331,9 @@ function renderLeaderboardPanel() {
     return;
   }
   const podium = vol.slice(0, 3).map((v, i) => `
-    <div class="podium-card place-${i + 1}">
+    <div class="podium-card place-${i + 1}${currentUser && v.name === displayName() ? ' lb-row-me' : ''}">
       <div class="podium-medal">${['🥇', '🥈', '🥉'][i]}</div>
-      <div class="podium-name">${v.name}</div>
+      <div class="podium-name">${v.name}${currentUser && v.name === displayName() ? '<span class="you-chip">YOU</span>' : ''}</div>
       <div class="podium-pts">${v.points} PTS</div>
       <div class="podium-meta">${v.count} cleanups${v.verified ? ` · ${v.verified} AI-verified` : ''}</div>
     </div>`).join('');
@@ -1528,7 +1535,7 @@ function renderMyReports() {
     const sevLabel = t[r.severity] || r.severity;
     return `
       <div class="lb-row">
-        <div class="lb-name">${r.title}${r.group_name ? ` <span style="font-size:0.7rem; color:var(--text-muted);">👥 ${r.group_name}</span>` : ''}</div>
+        <div class="lb-name">${r.title}${r.group_name ? ` <span class="group-chip"><i class="ph ph-users-three"></i> ${r.group_name}</span>` : ''}</div>
         <div class="lb-score">
           <span class="status-pill ${r.status}" style="font-size:0.65rem;">${statusLabel}</span>
           <span class="badge sev-${r.severity}" style="font-size:0.65rem;">${sevLabel}</span>
