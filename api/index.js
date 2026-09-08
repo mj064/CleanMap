@@ -135,7 +135,8 @@ app.post('/api/reports', async (req, res) => {
     ...(user_id ? { user_id } : {}),
     ...(ai_category ? { ai_category } : {}),
     ...(ai_severity ? { ai_severity } : {}),
-    ...(ai_summary ? { ai_summary } : {})
+    ...(ai_summary ? { ai_summary } : {}),
+    ...(req.body.ai_is_waste !== undefined ? { ai_is_waste: !!req.body.ai_is_waste } : {})
   };
 
   if (!supabase) return res.status(500).json({ success: false, error: "Database not connected" });
@@ -156,11 +157,11 @@ app.post('/api/reports', async (req, res) => {
 // PATCH: Claim a report
 app.patch('/api/reports/:id/claim', async (req, res) => {
   const { id } = req.params;
-  const { volunteer, user_id } = req.body;
+  const { volunteer, user_id, group_name } = req.body;
 
   const { data, error } = await supabase
     .from('reports')
-    .update({ status: 'in-progress', volunteer: volunteer || 'Anonymous', ...(user_id ? { user_id } : {}) })
+    .update({ status: 'in-progress', volunteer: volunteer || 'Anonymous', ...(user_id ? { user_id } : {}), ...(group_name ? { group_name } : {}) })
     .eq('id', id)
     .select()
     .single();
@@ -461,6 +462,42 @@ Did the waste actually get cleaned up? Reply ONLY valid JSON (no markdown): {"cl
     return null;
   }
 }
+
+// POST: check whether the caller (by auth token) is a moderator
+app.post('/api/moderator/check', async (req, res) => {
+  const token = (req.headers.authorization || '').replace('Bearer ', '');
+  const allow = (process.env.MODERATOR_EMAILS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (!token || !supabase || !allow.length) return res.json({ success: true, data: { moderator: false } });
+  try {
+    const { data } = await supabase.auth.getUser(token);
+    const email = data?.user?.email?.toLowerCase() || null;
+    res.json({ success: true, data: { moderator: !!email && allow.includes(email), email } });
+  } catch {
+    res.json({ success: true, data: { moderator: false } });
+  }
+});
+
+// DELETE a report (moderators only — validated via auth token + allowlist)
+app.delete('/api/reports/:id', async (req, res) => {
+  const token = (req.headers.authorization || '').replace('Bearer ', '');
+  const allow = (process.env.MODERATOR_EMAILS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (!supabase) return res.status(500).json({ success: false, error: 'Database not connected' });
+
+  let email = null;
+  if (token) {
+    try {
+      const { data } = await supabase.auth.getUser(token);
+      email = data?.user?.email?.toLowerCase() || null;
+    } catch { /* invalid token */ }
+  }
+  if (!allow.length || !email || !allow.includes(email)) {
+    return res.status(403).json({ success: false, error: 'Moderator access required' });
+  }
+
+  const { error } = await supabase.from('reports').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ success: false, error: error.message });
+  res.json({ success: true });
+});
 
 // GET Dash Stats
 app.get('/api/stats', async (req, res) => {

@@ -1947,3 +1947,73 @@ html[data-theme="dark"] .theme-icon-dark { display: none; }
   /* Keep the toast visible above the bottom nav */
   .toast.show { bottom: 80px; }
 }
+
+/* ═════ Leaderboard podium + groups ═════ */
+.podium {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.podium-card {
+  background: var(--bg-hover);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 14px 10px;
+  text-align: center;
+}
+.podium-card.place-1 { border-color: rgba(245, 158, 11, 0.5); background: linear-gradient(180deg, rgba(245, 158, 11, 0.1), var(--bg-hover)); }
+.podium-card.place-2 { border-color: rgba(148, 163, 184, 0.5); }
+.podium-card.place-3 { border-color: rgba(180, 121, 66, 0.5); }
+.podium-medal { font-size: 1.6rem; margin-bottom: 4px; }
+.podium-name { font-weight: 700; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.podium-pts { font-weight: 800; color: var(--accent-primary); font-size: 0.95rem; margin: 2px 0; }
+.podium-meta { font-size: 0.62rem; color: var(--text-muted); }
+
+/* Week impact bars */
+.week-impact { display: flex; flex-direction: column; gap: 6px; }
+.week-row { display: flex; align-items: flex-end; gap: 10px; }
+.week-day { width: 32px; font-size: 0.65rem; font-weight: 600; color: var(--text-muted); }
+.week-bars { display: flex; align-items: flex-end; gap: 3px; flex: 1; height: 34px; }
+.week-bar { width: 12px; border-radius: 3px 3px 0 0; }
+.b-created { background: var(--accent-primary); opacity: 0.45; }
+.b-cleaned { background: var(--color-cleaned); }
+.week-count { font-size: 0.62rem; color: var(--text-light); width: 36px; text-align: right; }
+.week-legend { display: flex; gap: 14px; margin-top: 10px; font-size: 0.65rem; color: var(--text-muted); }
+.week-legend span { display: flex; align-items: center; gap: 5px; }
+.week-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.d-created { background: var(--accent-primary); opacity: 0.45; }
+.d-cleaned { background: var(--color-cleaned); }
+.impact-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.impact-chip {
+  background: var(--bg-hover);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  padding: 4px 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+/* AI-flagged nonsense chip */
+.ai-flagged-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  font-size: 0.62rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+/* Danger button (moderator delete) */
+.btn-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+.btn-danger:hover { background: rgba(239, 68, 68, 0.22); }

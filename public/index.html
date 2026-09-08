@@ -46,6 +46,14 @@
           <i class="ph ph-chart-line-up"></i>
           <span data-i18n="dashboard">Dashboard</span>
         </button>
+        <button class="nav-item" data-panel="leaderboard">
+          <i class="ph ph-trophy"></i>
+          <span>Leaderboard</span>
+        </button>
+        <button class="nav-item" data-panel="profile">
+          <i class="ph ph-user-circle"></i>
+          <span>Profile</span>
+        </button>
         <button class="nav-item" data-panel="report">
           <i class="ph ph-plus-circle"></i>
           <span data-i18n="new_report">New Report</span>
@@ -160,10 +168,9 @@
 
             <div class="dashboard-columns">
               <div class="dash-card">
-                <h3 data-i18n="volunteer_leaderboard">Volunteer Leaderboard</h3>
-                <div class="leaderboard-list" id="leaderboard-list">
-                  <!-- Injected via JS -->
-                </div>
+                <h3>📈 Impact — Last 7 Days</h3>
+                <div class="impact-stats" id="impact-stats"></div>
+                <div class="week-impact" id="week-impact"></div>
               </div>
               <div class="dash-card">
                 <h3 data-i18n="severity_breakdown">Severity Breakdown</h3>
@@ -174,6 +181,36 @@
                 <div class="activity-feed" id="activity-feed"></div>
               </div>
             </div>
+          </div>
+        </section>
+
+        <!-- Leaderboard Panel -->
+        <section class="panel" id="panel-leaderboard">
+          <div class="dashboard-layout">
+            <div class="dash-hero">
+              <div>
+                <h1 class="page-title">🏆 Leaderboard</h1>
+                <p class="page-subtitle">Top eco-warriors and cleanup groups — live scores</p>
+              </div>
+            </div>
+            <div class="filter-group">
+              <button class="filter-tab active" id="lb-tab-vol">🧑‍🤝‍🧑 Volunteers</button>
+              <button class="filter-tab" id="lb-tab-groups">👥 Groups</button>
+            </div>
+            <div class="dash-card" id="leaderboard-panel-content"></div>
+          </div>
+        </section>
+
+        <!-- Profile Panel -->
+        <section class="panel" id="panel-profile">
+          <div class="dashboard-layout">
+            <div class="dash-hero">
+              <div>
+                <h1 class="page-title">👤 My Profile</h1>
+                <p class="page-subtitle">Your impact story, contact details and group</p>
+              </div>
+            </div>
+            <div id="profile-content"></div>
           </div>
         </section>
 
@@ -255,7 +292,9 @@
       <nav class="bottom-nav">
         <button class="bottom-nav-item nav-item active" data-panel="map"><i class="ph ph-map-trifold"></i><span data-i18n="global_map">Global Map</span></button>
         <button class="bottom-nav-item nav-item" data-panel="dashboard"><i class="ph ph-chart-bar"></i><span data-i18n="dashboard">Dashboard</span></button>
+        <button class="bottom-nav-item nav-item" data-panel="leaderboard"><i class="ph ph-trophy"></i><span>Board</span></button>
         <button class="bottom-nav-item nav-item" data-panel="report"><i class="ph ph-plus-circle"></i><span data-i18n="new_report">New Report</span></button>
+        <button class="bottom-nav-item nav-item" data-panel="profile"><i class="ph ph-user-circle"></i><span>Me</span></button>
       </nav>
     </main>
   </div>

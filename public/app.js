@@ -250,6 +250,10 @@ async function refreshAllQuietly() {
   renderReportCards();
   renderDashboard();
   renderMapLeaderboard();
+  renderLeaderboardPanel();
+  renderWeekImpact();
+  renderProfileStats();
+  renderMyReports();
 }
 
 // ── Nearby Leader card on the main map (live, follows the map center) ──
@@ -317,6 +321,7 @@ function calculateLeaderboard() {
   const sortedLeaderboard = Object.values(volunteerScores).sort((a,b) => b.points - a.points);
   
   const lbContainer = document.getElementById('leaderboard-list');
+  if (!lbContainer) return; // leaderboard now lives in its own panel
   lbContainer.innerHTML = '';
   
   if (sortedLeaderboard.length === 0) {
@@ -491,14 +496,24 @@ function detailHtml(r) {
   let actions = '';
   if (r.status === 'reported') {
     actions = `<button class="btn btn-primary btn-block" style="margin-top:12px;" onclick="claimReport('${r.id}')"><i class="ph ph-handshake"></i> ${t.claim_task}</button>`;
+    if (isModerator || (currentUser && myProfile?.group_name)) {
+      actions += `<button class="btn btn-secondary btn-block" style="margin-top:8px;" onclick="claimReportGroup('${r.id}')"><i class="ph ph-users-three"></i> ${myProfile?.group_name ? `Claim for group: ${myProfile.group_name}` : 'Claim for a group'}</button>`;
+    }
   } else if (r.status === 'in-progress') {
     actions = `<button class="btn btn-secondary btn-block" style="margin-top:12px;" onclick="triggerProofModal('${r.id}')"><i class="ph ph-camera-plus"></i> ${t.upload_proof_btn}</button>`;
   }
+  if (isModerator) {
+    actions += `<button class="btn btn-danger btn-block" style="margin-top:8px;" onclick="deleteReport('${r.id}')"><i class="ph ph-trash"></i> Remove report (moderator)</button>`;
+  }
+
+  const flagged = (r.ai_is_waste === false)
+    ? `<span class="ai-flagged-badge" title="AI analysis suggests this photo may not show real waste"><i class="ph ph-flag"></i> Flagged</span> `
+    : '';
 
   return `
     ${generateBeforeAfterHtml(r)}
     <div class="popup-title">${t.details_title}</div>
-    <div class="detail-heading">${verified}${r.title}</div>
+    <div class="detail-heading">${flagged}${verified}${r.title}</div>
     <div class="popup-loc"><i class="ph ph-map-pin"></i> ${r.location}</div>
     <div class="popup-desc">${r.description || 'No description provided.'}</div>
     <div style="margin-bottom:4px;">
@@ -752,13 +767,14 @@ function renderReportCards() {
 
     const sevLabel = t[r.severity] || r.severity;
     const statusLabel = t[`${r.status}_tab`] || r.status;
+    const flagChip = (r.ai_is_waste === false) ? ' ⚠️' : '';
     const verifiedBadge = (r.status === 'cleaned' && r.ai_verified === true)
       ? `<span class="ai-verified-badge" title="AI compared before/after photos and confirmed this cleanup"><i class="ph ph-robot"></i> ✓</span>`
       : '';
 
     card.innerHTML = `
       <div class="card-top">
-        <div class="card-title">${r.title} ${verifiedBadge}</div>
+        <div class="card-title">${flagChip}${r.title} ${verifiedBadge}</div>
         <div class="badge sev-${r.severity}"><span class="badge-dot"></span>${sevLabel}</div>
       </div>
       <div class="card-loc"><i class="ph ph-map-pin-line"></i> ${r.location}</div>
@@ -1090,6 +1106,7 @@ document.getElementById('submit-report').addEventListener('click', async () => {
       : (document.getElementById('report-reporter').value.trim() || 'Anonymous'),
     user_id: currentUser?.id || null,
     ...(aiSuggestions ? {
+      ai_is_waste: aiSuggestions.is_waste,
       ai_category: aiSuggestions.category,
       ai_severity: aiSuggestions.severity,
       ai_summary: aiSuggestions.suggested_description
@@ -1240,12 +1257,330 @@ async function initAuth() {
     sbClient.auth.onAuthStateChange((_event, session) => {
       currentUser = session?.user || null;
       renderAuthUI();
+      (async () => {
+        await loadProfile();
+        await checkModerator();
+        renderProfilePanel();
+      })();
     });
   } catch (err) {
     console.warn('Auth init failed:', err.message);
     renderAuthUI();
   }
 }
+
+// ═══════════════════════════════════════════
+// LEADERBOARD PANEL + WEEK IMPACT
+// ═══════════════════════════════════════════
+let lbView = 'vol';
+
+function computeBoardStats() {
+  const vol = {}, grp = {};
+  reports.forEach(r => {
+    if (r.status === 'cleaned' && r.volunteer) {
+      const v = vol[r.volunteer] = vol[r.volunteer] || { name: r.volunteer, points: 0, count: 0, verified: 0 };
+      v.points += POINTS[r.severity] || 0;
+      v.count += 1;
+      if (r.ai_verified === true) v.verified += 1;
+      if (r.group_name) {
+        const g = grp[r.group_name] = grp[r.group_name] || { name: r.group_name, points: 0, count: 0 };
+        g.points += POINTS[r.severity] || 0;
+        g.count += 1;
+      }
+    }
+  });
+  const byPoints = (a, b) => b.points - a.points;
+  return { vol: Object.values(vol).sort(byPoints), grp: Object.values(grp).sort(byPoints) };
+}
+
+function boardRowHTML(idx, name, points, count, verified) {
+  const medals = ['🥇', '🥈', '🥉'];
+  const rank = idx < 3 ? medals[idx] : `#${idx + 1}`;
+  return `
+    <div class="lb-row">
+      <div class="lb-rank">${rank}</div>
+      <div class="lb-name">${name}${verified ? ` <span class="ai-verified-badge"><i class="ph ph-robot"></i> ${verified}</span>` : ''}</div>
+      <div class="lb-score">
+        <span class="lb-count">${count} cleaned</span>
+        <span class="lb-points">${points} PTS</span>
+      </div>
+    </div>`;
+}
+
+function renderLeaderboardPanel() {
+  const el = document.getElementById('leaderboard-panel-content');
+  if (!el) return;
+  const { vol, grp } = computeBoardStats();
+
+  if (lbView === 'grp') {
+    el.innerHTML = grp.length
+      ? grp.map((g, i) => boardRowHTML(i, `👥 ${g.name}`, g.points, g.count, 0)).join('')
+      : `<div class="empty-state"><i class="ph ph-users-three"></i><p>No groups yet — create one from your Profile and claim cleanups together!</p></div>`;
+    return;
+  }
+
+  if (!vol.length) {
+    el.innerHTML = `<div class="empty-state"><i class="ph ph-trophy"></i><p>${translations[currentLang].lb_empty}</p></div>`;
+    return;
+  }
+  const podium = vol.slice(0, 3).map((v, i) => `
+    <div class="podium-card place-${i + 1}">
+      <div class="podium-medal">${['🥇', '🥈', '🥉'][i]}</div>
+      <div class="podium-name">${v.name}</div>
+      <div class="podium-pts">${v.points} PTS</div>
+      <div class="podium-meta">${v.count} cleanups${v.verified ? ` · ${v.verified} AI-verified` : ''}</div>
+    </div>`).join('');
+  const rest = vol.slice(3).map((v, i) => boardRowHTML(i + 3, v.name, v.points, v.count, v.verified)).join('');
+  el.innerHTML = `<div class="podium">${podium}</div>${rest}`;
+}
+
+function renderWeekImpact() {
+  const el = document.getElementById('week-impact');
+  if (!el) return;
+  const statsEl = document.getElementById('impact-stats');
+
+  const days = [...Array(7)].map((_, i) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (6 - i)); return d; });
+  const created = days.map(() => 0), cleaned = days.map(() => 0);
+  const cleanedReports = [];
+  reports.forEach(r => {
+    const c = new Date(r.created_at || r.date);
+    days.forEach((d, i) => {
+      const next = new Date(d); next.setDate(d.getDate() + 1);
+      if (c >= d && c < next) {
+        created[i]++;
+        const doneAt = r.updated_at ? new Date(r.updated_at) : c;
+        if (r.status === 'cleaned' && doneAt >= d && doneAt < next) cleaned[i]++;
+      }
+    });
+    if (r.status === 'cleaned' && r.updated_at) cleanedReports.push(r);
+  });
+
+  if (statsEl) {
+    const rate = reports.length ? Math.round(reports.filter(r => r.status === 'cleaned').length / reports.length * 100) : 0;
+    const avgH = cleanedReports.length
+      ? Math.round(cleanedReports.reduce((s, r) => s + (new Date(r.updated_at) - new Date(r.created_at)), 0) / cleanedReports.length / 3600000 * 10) / 10
+      : null;
+    statsEl.innerHTML = `
+      <span class="impact-chip">✅ ${rate}% resolved</span>
+      <span class="impact-chip">⚡ ${avgH !== null ? `avg cleanup ${avgH}h` : 'no cleanups yet'}</span>
+      <span class="impact-chip">👥 ${computeBoardStats().vol.length} volunteers</span>`;
+  }
+
+  const max = Math.max(1, ...created, ...cleaned);
+  el.innerHTML = days.map((d, i) => `
+    <div class="week-row">
+      <span class="week-day">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]}</span>
+      <div class="week-bars">
+        <div class="week-bar b-created" style="height:${Math.round(created[i] / max * 26) + 3}px" title="${created[i]} filed"></div>
+        <div class="week-bar b-cleaned" style="height:${Math.round(cleaned[i] / max * 26) + 3}px" title="${cleaned[i]} cleaned"></div>
+      </div>
+      <span class="week-count">${created[i]}·${cleaned[i]}</span>
+    </div>`).join('') +
+    `<div class="week-legend"><span><i class="week-dot d-created"></i> Filed</span><span><i class="week-dot d-cleaned"></i> Cleaned</span></div>`;
+}
+
+document.getElementById('lb-tab-vol').addEventListener('click', () => {
+  lbView = 'vol';
+  document.getElementById('lb-tab-vol').classList.add('active');
+  document.getElementById('lb-tab-groups').classList.remove('active');
+  renderLeaderboardPanel();
+});
+document.getElementById('lb-tab-groups').addEventListener('click', () => {
+  lbView = 'grp';
+  document.getElementById('lb-tab-groups').classList.add('active');
+  document.getElementById('lb-tab-vol').classList.remove('active');
+  renderLeaderboardPanel();
+});
+
+// ═══════════════════════════════════════════
+// PROFILE + GROUPS + MODERATION
+// ═══════════════════════════════════════════
+let myProfile = null;
+let isModerator = false;
+
+async function loadProfile() {
+  myProfile = null;
+  if (!currentUser || !sbClient) return;
+  try {
+    const { data } = await sbClient.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
+    myProfile = data || { id: currentUser.id, phone: '', group_name: '' };
+  } catch {
+    myProfile = { id: currentUser.id, phone: '', group_name: '' };
+  }
+}
+
+async function saveProfileField(field, value) {
+  if (!currentUser || !sbClient) return;
+  const record = { id: currentUser.id, phone: myProfile?.phone || '', group_name: myProfile?.group_name || '', [field]: value };
+  const { error } = await sbClient.from('profiles').upsert(record);
+  if (error) { showToast(false, 'Could not save: ' + error.message); return; }
+  if (myProfile) myProfile[field] = value;
+  showToast(true, 'Profile updated ✓');
+}
+
+async function checkModerator() {
+  isModerator = false;
+  if (!currentUser || !sbClient) return;
+  try {
+    const token = (await sbClient.auth.getSession()).data.session?.access_token;
+    if (!token) return;
+    const res = await fetch(`${API_BASE}/moderator/check`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+    const d = await res.json();
+    isModerator = !!d.data?.moderator;
+  } catch { /* stay non-moderator */ }
+}
+
+function computeMyStats() {
+  if (!currentUser) return null;
+  const me = currentUser.id;
+  const myName = displayName();
+  const filed = reports.filter(r => r.user_id === me).length;
+  const cleaned = reports.filter(r => r.status === 'cleaned' && (r.user_id === me || (myName && r.volunteer === myName)));
+  const points = cleaned.reduce((s, r) => s + (POINTS[r.severity] || 0), 0);
+  const verified = cleaned.filter(r => r.ai_verified === true).length;
+  return { filed, cleaned: cleaned.length, points, verified };
+}
+
+// ═══════════════════════════════════════════
+// PROFILE PANEL UI
+// ═══════════════════════════════════════════
+function renderProfilePanel() {
+  const el = document.getElementById('profile-content');
+  if (!el) return;
+
+  if (!currentUser) {
+    el.innerHTML = `
+      <div class="dash-card">
+        <div class="empty-state">
+          <i class="ph ph-user-circle"></i>
+          <p>Sign in to build your eco-impact profile, join a group and track your cleanups.</p>
+          <button class="btn btn-primary" onclick="openAuthModal()">${translations[currentLang].sign_in}</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const name = displayName();
+  el.innerHTML = `
+    <div class="dash-card">
+      <h3>Account</h3>
+      <div class="user-chip" style="margin:10px 0;">
+        <span class="user-avatar">${(name || 'U').charAt(0).toUpperCase()}</span>
+        <div class="user-info">
+          <span class="user-name">${name}</span>
+          <span class="user-name" style="font-weight:400; color:var(--text-muted); font-size:0.72rem;">${currentUser.email || ''}</span>
+        </div>
+        ${isModerator ? '<span class="ai-unverified-badge" style="background:rgba(79,70,229,.12); color:var(--accent-primary); border-color:var(--accent-primary);"><i class="ph ph-shield-star"></i> Moderator</span>' : ''}
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>📞 Phone number</label>
+        <input type="tel" id="profile-phone" placeholder="+91 …" value="${myProfile?.phone || ''}" />
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>👥 My cleanup group</label>
+        <input type="text" id="profile-group" placeholder="e.g. GreenWarriors Chennai" value="${myProfile?.group_name || ''}" />
+        <p style="font-size:0.7rem; color:var(--text-light); margin-top:6px;">Teammates who set the same group name clean with you — group claims earn points for the whole team.</p>
+      </div>
+      <button class="btn btn-primary" id="profile-save">Save profile</button>
+    </div>
+    <div class="dash-card" style="margin-top:16px;">
+      <h3>🌱 My Impact</h3>
+      <div class="stats-grid" id="profile-stats"></div>
+    </div>
+    <div class="dash-card" style="margin-top:16px;">
+      <h3>📋 My Reports</h3>
+      <div id="profile-reports"></div>
+    </div>`;
+
+  document.getElementById('profile-save').addEventListener('click', () => {
+    saveProfileField('phone', document.getElementById('profile-phone').value.trim());
+    saveProfileField('group_name', document.getElementById('profile-group').value.trim());
+  });
+
+  renderProfileStats();
+  renderMyReports();
+}
+
+function renderProfileStats() {
+  const el = document.getElementById('profile-stats');
+  if (!el || !currentUser) return;
+  const s = computeMyStats();
+  if (!s) return;
+  el.innerHTML = `
+    <div class="stat-card"><div class="stat-val">${s.filed}</div><div class="stat-title">Reports filed</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:var(--color-cleaned)">${s.cleaned}</div><div class="stat-title">Cleanups</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:var(--accent-primary)">${s.points}</div><div class="stat-title">Points</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:#10b981">${s.verified}</div><div class="stat-title">AI-verified</div></div>`;
+}
+
+function renderMyReports() {
+  const el = document.getElementById('profile-reports');
+  if (!el || !currentUser) return;
+  const mine = reports.filter(r => r.user_id === currentUser.id)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8);
+  if (!mine.length) {
+    el.innerHTML = `<div style="text-align:center; padding:16px; color:var(--text-light);">No reports yet — file your first one!</div>`;
+    return;
+  }
+  const t = translations[currentLang];
+  el.innerHTML = mine.map(r => {
+    const statusLabel = t[`${r.status}_tab`] || r.status;
+    const sevLabel = t[r.severity] || r.severity;
+    return `
+      <div class="lb-row">
+        <div class="lb-name">${r.title}${r.group_name ? ` <span style="font-size:0.7rem; color:var(--text-muted);">👥 ${r.group_name}</span>` : ''}</div>
+        <div class="lb-score">
+          <span class="status-pill ${r.status}" style="font-size:0.65rem;">${statusLabel}</span>
+          <span class="badge sev-${r.severity}" style="font-size:0.65rem;">${sevLabel}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── Moderation: remove nonsense reports ──
+window.deleteReport = async function (id) {
+  if (!confirm('Remove this report permanently? (Moderator action)')) return;
+  try {
+    const token = (await sbClient.auth.getSession()).data.session?.access_token;
+    const res = await fetch(`${API_BASE}/reports/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(true, 'Report removed');
+      mainMap.closePopup();
+      refreshAllQuietly();
+    } else {
+      showToast(false, data.error || 'Not allowed');
+    }
+  } catch {
+    showToast(false, 'Delete failed');
+  }
+};
+
+// ── Group claiming ──
+window.claimReportGroup = async function (id) {
+  if (!currentUser) { showToast(false, 'Sign in first'); openAuthModal(); return; }
+  const group = myProfile?.group_name;
+  if (!group) {
+    showToast(false, 'Set a group name in your Profile first');
+    document.querySelector('[data-panel="profile"]')?.click();
+    return;
+  }
+  const name = displayName();
+  try {
+    const res = await fetch(`${API_BASE}/reports/${id}/claim`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ volunteer: name, user_id: currentUser.id, group_name: group })
+    });
+    if ((await res.json()).success) {
+      showToast(true, `👥 Claimed for group ${group}! Clean it together.`);
+      refreshAllQuietly();
+    }
+  } catch { showToast(false, 'Claim failed'); }
+};
 
 // ── BOOTSTRAP ──
 init();
