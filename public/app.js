@@ -1275,6 +1275,34 @@ async function initAuth() {
   }
 }
 
+// ── Waste hotspot heatmap ──
+let heatLayer = null;
+
+function toggleHeatmap() {
+  const btn = document.getElementById('heatmap-btn');
+  if (heatLayer) {
+    mainMap.removeLayer(heatLayer);
+    heatLayer = null;
+    btn.classList.remove('active');
+    return;
+  }
+  const points = reports
+    .filter(r => r.lat != null && r.lng != null && r.status !== 'cleaned')
+    .map(r => {
+      const w = { low: 0.4, medium: 0.7, high: 1 }[r.severity] || 0.6;
+      return [r.lat, r.lng, w];
+    });
+  if (!points.length) { showToast(false, 'No active reports to map yet'); return; }
+  heatLayer = L.heatLayer(points, {
+    radius: 28, blur: 20, maxZoom: 16, max: 1.0,
+    gradient: { 0.2: '#3b82f6', 0.4: '#22c55e', 0.6: '#facc15', 0.8: '#f97316', 1.0: '#ef4444' }
+  }).addTo(mainMap);
+  btn.classList.add('active');
+  showToast(true, '🔥 Hotspots: blue = sparse → red = dense waste zones');
+}
+
+document.getElementById('heatmap-btn').addEventListener('click', toggleHeatmap);
+
 // ═══════════════════════════════════════════
 // LEADERBOARD PANEL + WEEK IMPACT
 // ═══════════════════════════════════════════
@@ -1448,6 +1476,49 @@ function computeMyStats() {
   return { filed, cleaned: cleaned.length, points, verified };
 }
 
+// ── Group actions ──
+async function groupCreate() {
+  const name = document.getElementById('group-create-name')?.value.trim();
+  if (!name) return;
+  const token = (await sbClient.auth.getSession()).data.session?.access_token;
+  const res = await fetch(`${API_BASE}/groups`, {
+    method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  }).then(r => r.json());
+  if (res.success) { showToast(true, `👑 Group "${name}" created — you're the leader!`); loadProfile().then(loadGroupUI); }
+  else showToast(false, res.error || 'Could not create');
+}
+
+window.groupJoin = async function (groupId) {
+  const token = (await sbClient.auth.getSession()).data.session?.access_token;
+  const res = await fetch(`${API_BASE}/groups/${groupId}/join`, {
+    method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requester_name: displayName() })
+  }).then(r => r.json());
+  if (res.success) { showToast(true, 'Request sent — the leader will approve it.'); loadGroupUI(); }
+  else showToast(false, res.error || 'Could not request');
+};
+
+window.groupDecide = async function (groupId, memberId, approve) {
+  const token = (await sbClient.auth.getSession()).data.session?.access_token;
+  const res = await fetch(`${API_BASE}/groups/${groupId}/decide`, {
+    method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ member_id: memberId, approve })
+  }).then(r => r.json());
+  if (res.success) { showToast(true, approve ? 'Member approved ✓' : 'Request rejected'); loadProfile().then(loadGroupUI); }
+  else showToast(false, res.error || 'Action failed');
+};
+
+window.groupLeave = async function (groupId) {
+  if (!confirm('Leave this group?')) return;
+  const token = (await sbClient.auth.getSession()).data.session?.access_token;
+  const res = await fetch(`${API_BASE}/groups/${groupId}/leave`, {
+    method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+  }).then(r => r.json());
+  if (res.success) { showToast(true, 'You left the group'); loadProfile().then(loadGroupUI); }
+  else showToast(false, res.error || 'Could not leave');
+};
+
 // ═══════════════════════════════════════════
 // PROFILE PANEL UI
 // ═══════════════════════════════════════════
@@ -1485,8 +1556,8 @@ function renderProfilePanel() {
       </div>
       <div class="form-group" style="margin-bottom:12px;">
         <label>👥 My cleanup group</label>
-        <input type="text" id="profile-group" placeholder="e.g. GreenWarriors Chennai" value="${myProfile?.group_name || ''}" />
-        <p style="font-size:0.7rem; color:var(--text-light); margin-top:6px;">Teammates who set the same group name clean with you — group claims earn points for the whole team.</p>
+        <div id="profile-group-ui"></div>
+        <p style="font-size:0.7rem; color:var(--text-light); margin-top:6px;">A leader creates the group; members request to join and the leader approves. Group claims earn points for the whole team.</p>
       </div>
       <button class="btn btn-primary" id="profile-save">Save profile</button>
     </div>
@@ -1501,11 +1572,83 @@ function renderProfilePanel() {
 
   document.getElementById('profile-save').addEventListener('click', () => {
     saveProfileField('phone', document.getElementById('profile-phone').value.trim());
-    saveProfileField('group_name', document.getElementById('profile-group').value.trim());
   });
 
+  loadGroupUI();
   renderProfileStats();
   renderMyReports();
+}
+
+// ── Group system UI (create / join / leader approvals) ──
+let myGroupInfo = null;
+
+async function loadGroupUI() {
+  const el = document.getElementById('profile-group-ui');
+  if (!el || !currentUser || !sbClient) return;
+  const token = (await sbClient.auth.getSession()).data.session?.access_token;
+  const authHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+  try {
+    const mineRes = await fetch(`${API_BASE}/groups/mine`, { headers: authHeaders }).then(r => r.json());
+    if (!mineRes.success) { el.innerHTML = '<p style="font-size:0.75rem; color:var(--text-light);">Sign in to use groups.</p>'; return; }
+    myGroupInfo = mineRes.data;
+    const allRes = await fetch(`${API_BASE}/groups`).then(r => r.json());
+    const allGroups = allRes.success ? allRes.data : [];
+
+    const active = myGroupInfo.active;
+    const pending = myGroupInfo.pending || [];
+    const leaderReqs = myGroupInfo.leaderRequests || [];
+    const joinedIds = new Set([...(active ? [active.group_id] : []), ...pending.map(p => p.group_id)]);
+
+    let html = '';
+
+    if (leaderReqs.length) {
+      html += `<div class="group-req-box"><strong>🔔 ${leaderReqs.length} join request${leaderReqs.length > 1 ? 's' : ''} for your group</strong>` +
+        leaderReqs.map(r => `
+          <div class="group-req-row">
+            <span>${r.requester_name || 'Volunteer'}</span>
+            <span>
+              <button class="btn btn-primary" style="padding:3px 10px; font-size:0.7rem;" onclick="groupDecide('${active.group_id}','${r.id}',true)">Approve</button>
+              <button class="btn btn-danger" style="padding:3px 10px; font-size:0.7rem;" onclick="groupDecide('${active.group_id}','${r.id}',false)">Reject</button>
+            </span>
+          </div>`).join('') + `</div>`;
+    }
+
+    if (active) {
+      const isLeader = active.role === 'leader';
+      html += `
+        <div class="user-chip" style="margin:8px 0;">
+          <span class="user-avatar" style="background:linear-gradient(135deg,#3b82f6,#2563eb);">${isLeader ? '👑' : '👥'}</span>
+          <div class="user-info">
+            <span class="user-name">${active.groups.name} ${isLeader ? '<span class="you-chip">LEADER</span>' : ''}</span>
+            <span class="user-name" style="font-weight:400; color:var(--text-muted); font-size:0.68rem;">Active member</span>
+          </div>
+        </div>
+        ${isLeader ? '' : `<button class="btn btn-danger" style="padding:5px 12px; font-size:0.72rem;" onclick="groupLeave('${active.group_id}')">Leave group</button>`}`;
+    } else if (pending.length) {
+      html += `<p style="font-size:0.75rem; color:var(--text-muted); margin:6px 0;">⏳ Pending request: <strong>${pending[0].name}</strong> — waiting for leader approval.</p>`;
+    } else {
+      html += `
+        <div style="display:flex; gap:8px; margin:8px 0;">
+          <input type="text" id="group-create-name" placeholder="Create a new group…" style="flex:1;" />
+          <button class="btn btn-primary" style="padding:6px 12px; font-size:0.72rem;" onclick="groupCreate()">Create</button>
+        </div>`;
+    }
+
+    const others = allGroups.filter(g => !joinedIds.has(g.id));
+    if (others.length && !active) {
+      html += `<p style="font-size:0.68rem; font-weight:700; color:var(--text-muted); margin-top:10px;">OR JOIN ONE (${others.length}):</p>` +
+        others.slice(0, 6).map(g => `
+          <div class="group-req-row">
+            <span>👥 ${g.name} <span style="color:var(--text-muted); font-size:0.65rem;">· ${g.members} member${g.members > 1 ? 's' : ''}</span></span>
+            <button class="btn btn-secondary" style="padding:3px 10px; font-size:0.68rem;" onclick="groupJoin('${g.id}')">Request</button>
+          </div>`).join('');
+    }
+
+    el.innerHTML = html || '<p style="font-size:0.75rem; color:var(--text-light);">No groups yet — create the first one!</p>';
+  } catch (e) {
+    el.innerHTML = '<p style="font-size:0.75rem; color:var(--text-light);">Groups unavailable right now.</p>';
+  }
 }
 
 function renderProfileStats() {

@@ -499,6 +499,133 @@ app.delete('/api/reports/:id', async (req, res) => {
   res.json({ success: true });
 });
 
+// ── Group system ──
+async function getAuthUser(req) {
+  const token = (req.headers.authorization || '').replace('Bearer ', '');
+  if (!token || !supabase) return null;
+  try {
+    const { data } = await supabase.auth.getUser(token);
+    return data?.user ? { id: data.user.id, email: (data.user.email || '').toLowerCase(), name: data.user.user_metadata?.name || (data.user.email || '').split('@')[0] } : null;
+  } catch { return null; }
+}
+
+// Groups: list all (with active member counts)
+app.get('/api/groups', async (req, res) => {
+  if (!supabase) return res.status(500).json({ success: false, error: 'Database not connected' });
+  try {
+    const { data: groups } = await supabase.from('groups').select('*').order('created_at', { ascending: false });
+    const { data: members } = await supabase.from('group_members').select('group_id, status');
+    const counts = {};
+    (members || []).forEach(m => { if (m.status === 'active') counts[m.group_id] = (counts[m.group_id] || 0) + 1; });
+    res.json({
+      success: true,
+      data: (groups || []).map(g => ({ id: g.id, name: g.name, leader_id: g.leader_id, members: counts[g.id] || 1 }))
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Groups: my memberships + (as leader) pending join requests
+app.get('/api/groups/mine', async (req, res) => {
+  const user = await getAuthUser(req);
+  if (!user) return res.status(401).json({ success: false, error: 'Sign in required' });
+  try {
+    const { data: mine } = await supabase.from('group_members').select('*, groups(name)').eq('user_id', user.id);
+    const active = (mine || []).find(m => m.status === 'active' && m.groups?.name) || null;
+    const pending = (mine || []).filter(m => m.status === 'pending').map(m => ({ id: m.id, group_id: m.group_id, name: m.groups?.name }));
+
+    let leaderRequests = [];
+    if (active && active.role === 'leader') {
+      const { data: reqs } = await supabase.from('group_members')
+        .select('id, requester_name, created_at').eq('group_id', active.group_id).eq('status', 'pending');
+      leaderRequests = reqs || [];
+    }
+    res.json({ success: true, data: { active, pending, leaderRequests } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Groups: create (creator becomes leader)
+app.post('/api/groups', async (req, res) => {
+  const user = await getAuthUser(req);
+  if (!user) return res.status(401).json({ success: false, error: 'Sign in required' });
+  const name = (req.body.name || '').trim();
+  if (!name || name.length > 40) return res.status(400).json({ success: false, error: 'Group name required (max 40 chars)' });
+  try {
+    const { data: existing } = await supabase.from('groups').select('id').ilike('name', name).maybeSingle();
+    if (existing) return res.status(409).json({ success: false, error: 'That group name is taken' });
+
+    const { data: group, error } = await supabase.from('groups').insert({ name, leader_id: user.id }).select().single();
+    if (error) throw error;
+    await supabase.from('group_members').insert({ group_id: group.id, user_id: user.id, requester_name: user.name, role: 'leader', status: 'active' });
+    await supabase.from('profiles').upsert({ id: user.id, group_name: name });
+    res.json({ success: true, data: group });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Groups: request to join
+app.post('/api/groups/:id/join', async (req, res) => {
+  const user = await getAuthUser(req);
+  if (!user) return res.status(401).json({ success: false, error: 'Sign in required' });
+  try {
+    const { error } = await supabase.from('group_members')
+      .insert({ group_id: req.params.id, user_id: user.id, requester_name: req.body.requester_name || user.name, status: 'pending' });
+    if (error) return res.status(409).json({ success: false, error: error.code === '23505' ? 'Already a member or request pending' : error.message });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Groups: leader approves/rejects a join request
+app.post('/api/groups/:id/decide', async (req, res) => {
+  const user = await getAuthUser(req);
+  if (!user) return res.status(401).json({ success: false, error: 'Sign in required' });
+  const { member_id, approve } = req.body;
+  if (!member_id) return res.status(400).json({ success: false, error: 'member_id required' });
+  try {
+    const { data: group } = await supabase.from('groups').select('*').eq('id', req.params.id).single();
+    if (!group) return res.status(404).json({ success: false, error: 'Group not found' });
+    if (group.leader_id !== user.id) return res.status(403).json({ success: false, error: 'Only the group leader can decide' });
+
+    if (approve) {
+      const { data: member } = await supabase.from('group_members').select('*').eq('id', member_id).single();
+      const { error } = await supabase.from('group_members').update({ status: 'active' }).eq('id', member_id);
+      if (error) throw error;
+      if (member?.user_id) await supabase.from('profiles').upsert({ id: member.user_id, group_name: group.name });
+      res.json({ success: true, data: { approved: true } });
+    } else {
+      const { error } = await supabase.from('group_members').delete().eq('id', member_id);
+      if (error) throw error;
+      res.json({ success: true, data: { approved: false } });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Groups: leave (leaders must keep leading)
+app.post('/api/groups/:id/leave', async (req, res) => {
+  const user = await getAuthUser(req);
+  if (!user) return res.status(401).json({ success: false, error: 'Sign in required' });
+  try {
+    const { data: group } = await supabase.from('groups').select('*').eq('id', req.params.id).single();
+    if (group && group.leader_id === user.id) {
+      return res.status(400).json({ success: false, error: 'Leaders cannot leave their group' });
+    }
+    const { error } = await supabase.from('group_members').delete().eq('group_id', req.params.id).eq('user_id', user.id);
+    if (error) throw error;
+    await supabase.from('profiles').upsert({ id: user.id, group_name: null });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET Dash Stats
 app.get('/api/stats', async (req, res) => {
   try {
