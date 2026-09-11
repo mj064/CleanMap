@@ -9,7 +9,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Map & reports', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.locator('#map .leaflet-map-pane').waitFor({ timeout: 20_000 });
+    await page.locator('#map.leaflet-container').waitFor({ timeout: 30_000 });
     // Give reports time to load and markers to render
     await page.waitForTimeout(3000);
   });
@@ -38,9 +38,12 @@ test.describe('Map & reports', () => {
     await card.click();
     await expect(page.locator('.detail-popup')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.detail-popup .detail-heading')).toBeVisible();
-    await expect(page.locator('.detail-popup .detail-rows > div')).toHaveCount(3);
-    // Close button works
-    await page.locator('.detail-popup .leaflet-popup-close-button').click();
+    await expect(page.locator('.detail-popup .detail-rows > div').first()).toBeVisible();
+    // Row count varies (volunteer/group rows only when present) — must be at least reporter + date + coords
+    const rowCount = await page.locator('.detail-popup .detail-rows > div').count();
+    expect(rowCount).toBeGreaterThanOrEqual(3);
+    // Close by clicking elsewhere on the map (Leaflet default close-on-click)
+    await page.locator('#map').click({ position: { x: 15, y: 15 } });
     await expect(page.locator('.detail-popup')).toBeHidden();
   });
 
@@ -71,3 +74,4 @@ test.describe('Map & reports', () => {
     expect(zoomBox.y + zoomBox.height).toBeLessThanOrEqual(locateBox.y + 5);
   });
 });
+

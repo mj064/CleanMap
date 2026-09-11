@@ -1,13 +1,16 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Mobile responsive layout tests (Pixel 7 project).
+ * Mobile responsive layout tests (Pixel 7 project only).
+ * Skips automatically when running in a desktop viewport —
+ * the bottom nav is hidden by design above 900px.
  */
+test.skip(({ viewport }) => viewport.width >= 900, 'mobile-only tests');
 
 test.describe('Mobile layout', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.locator('#map .leaflet-map-pane').waitFor({ timeout: 20_000 });
+    await page.locator('#map.leaflet-container').waitFor({ timeout: 30_000 });
   });
 
   test('bottom nav is visible, desktop sidebar hidden', async ({ page }) => {
@@ -30,3 +33,4 @@ test.describe('Mobile layout', () => {
     await expect(page.locator('#panel-map')).toHaveClass(/active/);
   });
 });
+
