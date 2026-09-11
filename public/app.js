@@ -232,6 +232,19 @@ async function init() {
 
   // Auto-focus the map on the user's real location on load (Google Maps style)
   locateMe(true);
+
+  // ── Deep link: /?report=<id> (shared links) ──
+  const repParam = new URLSearchParams(location.search).get('report');
+  if (repParam) {
+    setTimeout(() => {
+      const target = reports.find(r => r.id === repParam);
+      if (target) {
+        document.querySelector('[data-panel="map"]')?.click();
+        mainMap.flyTo([target.lat, target.lng], 16, { duration: 1 });
+        setTimeout(() => openDetailPopup(mainMap, target), 900);
+      }
+    }, 1500);
+  }
 }
 
 async function fetchReports(params = {}) {
@@ -505,6 +518,7 @@ function detailHtml(r) {
   if (isModerator) {
     actions += `<button class="btn btn-danger btn-block" style="margin-top:8px;" onclick="deleteReport('${r.id}')"><i class="ph ph-trash"></i> Remove report (moderator)</button>`;
   }
+  actions += `<button class="btn btn-secondary btn-block" style="margin-top:8px;" onclick="shareReport('${r.id}')"><i class="ph ph-share-network"></i> Share report</button>`;
 
   const flagged = (r.ai_is_waste === false)
     ? `<span class="ai-flagged-badge" title="AI analysis suggests this photo may not show real waste"><i class="ph ph-flag"></i> Flagged</span> `
@@ -1692,6 +1706,19 @@ function renderMyReports() {
       </div>`;
   }).join('');
 }
+
+// ── Share: native share on mobile, WhatsApp fallback on desktop ──
+window.shareReport = function (id) {
+  const r = reports.find(x => x.id === id);
+  if (!r) return;
+  const url = `${location.origin}/?report=${r.id}`;
+  const text = `🌍 Waste spotted on CleanMap: "${r.title}" at ${r.location}. Help clean it up!`;
+  if (navigator.share) {
+    navigator.share({ title: 'CleanMap', text, url }).catch(() => {});
+  } else {
+    window.open(`https://wa.me/?text=${encodeURIComponent(text + ' ' + url)}`, '_blank');
+  }
+};
 
 // ── Moderation: remove nonsense reports ──
 window.deleteReport = async function (id) {

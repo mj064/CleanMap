@@ -152,6 +152,14 @@ app.post('/api/reports', async (req, res) => {
   }
 
   res.json({ success: true, data });
+
+  // 📬 Notify on high-severity reports (fire-and-forget)
+  if (severity === 'high') {
+    sendNotification(
+      '🚨 High-severity waste report on CleanMap',
+      `A high-severity report was just filed:\n\n"${title}" at ${location}\nFiled by: ${reporter}\n\nOpen: ${(process.env.APP_URL || 'https://clean-map-sigma.vercel.app')}/?report=${data.id}`
+    );
+  }
 });
 
 // PATCH: Claim a report
@@ -229,6 +237,14 @@ app.patch('/api/reports/:id/clean', async (req, res) => {
 
   if (error) return res.status(500).json({ success: false, error: error.message });
   res.json({ success: true, data, aiVerified });
+
+  // 📬 Notify when a cleanup is AI-verified (fire-and-forget)
+  if (aiVerified === true) {
+    sendNotification(
+      '✅ AI-verified cleanup on CleanMap',
+      `"${data.title}" was just cleaned by ${data.volunteer || 'a volunteer'}${data.group_name ? ` (group: ${data.group_name})` : ''} and verified by AI.\n\nOpen: ${(process.env.APP_URL || 'https://clean-map-sigma.vercel.app')}/?report=${data.id}`
+    );
+  }
 });
 
 // POST: AI vision triage of an evidence photo.
@@ -498,6 +514,22 @@ app.delete('/api/reports/:id', async (req, res) => {
   if (error) return res.status(500).json({ success: false, error: error.message });
   res.json({ success: true });
 });
+
+// ── Email notifications (Resend). Graceful no-op without RESEND_API_KEY. ──
+async function sendNotification(subject, text) {
+  const key = process.env.RESEND_API_KEY;
+  const to = process.env.NOTIFY_EMAIL;
+  if (!key || !to) return;
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: 'CleanMap <onboarding@resend.dev>', to, subject, text })
+    });
+  } catch (e) {
+    console.error('notify failed:', e.message);
+  }
+}
 
 // ── Group system ──
 async function getAuthUser(req) {
