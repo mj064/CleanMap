@@ -9,7 +9,7 @@ test.describe('Smoke — app loads', () => {
   test('page loads with map, nav and header', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle(/CleanMap/i);
-    await expect(page.locator('#map .leaflet-pane')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#map .leaflet-map-pane')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.nav-links .nav-item')).toHaveCount(5);
     await expect(page.locator('#presence-pill')).toBeVisible();
   });

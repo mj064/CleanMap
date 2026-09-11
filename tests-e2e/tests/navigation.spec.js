@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.locator('#map .leaflet-pane').waitFor({ timeout: 20_000 });
+    await page.locator('#map .leaflet-map-pane').waitFor({ timeout: 20_000 });
   });
 
   test('all five panels switch correctly', async ({ page }) => {

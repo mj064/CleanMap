@@ -9,7 +9,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Map & reports', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.locator('#map .leaflet-pane').waitFor({ timeout: 20_000 });
+    await page.locator('#map .leaflet-map-pane').waitFor({ timeout: 20_000 });
     // Give reports time to load and markers to render
     await page.waitForTimeout(3000);
   });
