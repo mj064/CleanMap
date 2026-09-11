@@ -1120,21 +1120,27 @@ document.getElementById('submit-report').addEventListener('click', async () => {
     photoBase64: photoBase64
   };
 
+  // Offline → queue locally and aut-sync later
+  if (!navigator.onLine) {
+    try {
+      await queueAdd({ data: reportData });
+      showToast(true, '📴 Offline — your report is queued and will auto-sync when you\'re connected.');
+      resetReportForm();
+      refreshAllQuietly();
+      btn.disabled = false; btn.textContent = 'Submit into System';
+      checkFormValidity();
+      return;
+    } catch (e) {
+      showToast(false, 'Could not queue offline — please try again when online.');
+      btn.disabled = false; btn.textContent = 'Submit into System';
+      return;
+    }
+  }
+
   const newReport = await (await fetch(`${API_BASE}/reports`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reportData) })).json();
 
   if (newReport.success) {
-    document.getElementById('report-title').value = ''; document.getElementById('report-location').value = '';
-    document.getElementById('report-desc').value = ''; document.getElementById('report-reporter').value = currentUser ? (displayName() || '') : '';
-    document.getElementById('report-photo').value = '';
-    document.getElementById('photo-preview').style.display = 'none';
-    document.querySelectorAll('.sev-opt').forEach(o => o.classList.remove('selected'));
-    selectedSeverity = null;
-    if (reportPin) { reportMap.removeLayer(reportPin); reportPin = null; }
-    reportLatLng = null;
-    
-    document.getElementById('pin-indicator').classList.remove('active');
-    document.getElementById('pin-indicator').innerHTML = `<i class="ph ph-map-pin"></i><span>${translations[currentLang].click_map_coords}</span><button class="btn-text" id="geo-btn">${translations[currentLang].use_gps}</button>`;
-    
+    resetReportForm();
     showToast(true, translations[currentLang].proof_accepted || 'File recorded to global system.');
     document.querySelector('[data-panel="map"]').click();
     // Force immediate local refresh for instant feedback
@@ -1732,5 +1738,112 @@ window.claimReportGroup = async function (id) {
   } catch { showToast(false, 'Claim failed'); }
 };
 
+// ═══════════════════════════════════════════
+// OFFLINE QUEUE — IndexedDB report queue
+// Reports filed while offline sit in the queue
+// and auto-sync when connectivity returns.
+// ═══════════════════════════════════════════
+const QUEUE_DB = 'cleanmap-offline';
+let pendingSyncCount = 0;
+
+function resetReportForm() {
+  document.getElementById('report-title').value = '';
+  document.getElementById('report-location').value = '';
+  document.getElementById('report-desc').value = '';
+  document.getElementById('report-reporter').value = currentUser ? (displayName() || '') : '';
+  document.getElementById('report-photo').value = '';
+  document.getElementById('photo-preview').style.display = 'none';
+  document.querySelectorAll('.sev-opt').forEach(o => o.classList.remove('selected'));
+  selectedSeverity = null;
+  if (reportPin) { reportMap.removeLayer(reportPin); reportPin = null; }
+  reportLatLng = null;
+  document.getElementById('pin-indicator').classList.remove('active');
+  document.getElementById('pin-indicator').innerHTML = `<i class="ph ph-map-pin"></i><span>${translations[currentLang].click_map_coords}</span><button class="btn-text" id="geo-btn">${translations[currentLang].use_gps}</button>`;
+}
+
+function openQueueDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(QUEUE_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('reports', { keyPath: 'queued_at' });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function queueAdd(payload) {
+  const db = await openQueueDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('reports', 'readwrite');
+    tx.objectStore('reports').add({ ...payload, queued_at: Date.now() });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function queueAll() {
+  const db = await openQueueDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction('reports', 'readonly').objectStore('reports').getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function queueRemove(queuedAt) {
+  const db = await openQueueDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('reports', 'readwrite');
+    tx.objectStore('reports').delete(queuedAt);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function updatePendingUI() {
+  const pill = document.getElementById('offline-pill');
+  if (!pill) return;
+  pill.style.display = pendingSyncCount > 0 ? 'flex' : 'none';
+  const countEl = document.getElementById('offline-count');
+  if (countEl) countEl.textContent = pendingSyncCount;
+}
+
+async function syncOfflineQueue() {
+  const queued = await queueAll().catch(() => []);
+  pendingSyncCount = queued.length;
+  updatePendingUI();
+  if (!queued.length || !navigator.onLine) return;
+
+  for (const item of queued) {
+    try {
+      const res = await fetch(`${API_BASE}/reports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item.data)
+      });
+      if (res.ok) {
+        await queueRemove(item.queued_at);
+        pendingSyncCount--;
+        updatePendingUI();
+      } else if (res.status >= 400 && res.status < 500) {
+        // Permanently rejected → drop rather than loop forever
+        await queueRemove(item.queued_at);
+        pendingSyncCount--;
+        updatePendingUI();
+      }
+      // 5xx / network error → keep queued, retry later
+    } catch { break; } // still offline — stop and keep the rest queued
+  }
+  if (pendingSyncCount === 0) showToast(true, '📡 Back online — queued reports synced!');
+  refreshAllQuietly();
+}
+
+window.addEventListener('online', syncOfflineQueue);
+window.addEventListener('offline', () => {
+  pendingSyncCount = pendingSyncCount || 0;
+  updatePendingUI();
+  showToast(false, '📴 Offline — new reports will queue and sync automatically');
+});
+
 // ── BOOTSTRAP ──
 init();
+syncOfflineQueue();

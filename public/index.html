@@ -2,7 +2,9 @@
 <html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#10b981" />
+  <link rel="manifest" href="/manifest.json" />
   <title>CleanMap — Community Cleanup Platform</title>
   <meta name="description" content="Report, track, and clean up waste spots in your community with CleanMap.">
   <meta property="og:title" content="CleanMap — Community Cleanup Platform">
@@ -91,6 +93,9 @@
         </div>
         
         <div class="header-controls">
+          <div class="presence-pill" id="offline-pill" title="Reports waiting to sync" style="display:none;">
+            <i class="ph ph-cloud-slash" style="color:#f59e0b;"></i><span id="offline-count">0</span>
+          </div>
           <div class="presence-pill" id="presence-pill" title="Eco-warriors online now">
             <span class="presence-dot"></span><span id="presence-count">1</span>
           </div>
@@ -364,6 +369,12 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <script>
+    // ── PWA: register the service worker (before app.js runs) ──
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+    }
+  </script>
   <script src="app.js"></script>
 </body>
 </html>
