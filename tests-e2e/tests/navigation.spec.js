@@ -2,7 +2,14 @@ import { test, expect } from '@playwright/test';
 
 /**
  * Navigation & panel tests — read-only interactions.
+ * Viewport-aware: uses whichever nav is visible (sidebar on desktop,
+ * bottom bar on mobile).
  */
+
+async function gotoPanel(page, panel) {
+  await page.locator(`.nav-item[data-panel="${panel}"]:visible`).first().click();
+  await expect(page.locator(`#panel-${panel}`)).toHaveClass(/active/);
+}
 
 test.describe('Navigation', () => {
   test.beforeEach(async ({ page }) => {
@@ -12,14 +19,12 @@ test.describe('Navigation', () => {
 
   test('all five panels switch correctly', async ({ page }) => {
     for (const panel of ['dashboard', 'leaderboard', 'profile', 'report', 'map']) {
-      await page.locator(`.nav-item[data-panel="${panel}"]`).first().click();
-      await expect(page.locator(`#panel-${panel}`)).toHaveClass(/active/);
+      await gotoPanel(page, panel);
     }
   });
 
   test('leaderboard panel renders podium or honest empty state', async ({ page }) => {
-    await page.locator('[data-panel="leaderboard"]').first().click();
-    await expect(page.locator('#panel-leaderboard')).toHaveClass(/active/);
+    await gotoPanel(page, 'leaderboard');
     await page.waitForTimeout(1500);
     const content = page.locator('#leaderboard-panel-content');
     await expect(content).toBeVisible();
@@ -28,7 +33,7 @@ test.describe('Navigation', () => {
   });
 
   test('leaderboard groups tab switches', async ({ page }) => {
-    await page.locator('[data-panel="leaderboard"]').first().click();
+    await gotoPanel(page, 'leaderboard');
     await page.locator('#lb-tab-groups').click();
     await page.waitForTimeout(500);
     // Volunteers tab loses active state
@@ -36,8 +41,7 @@ test.describe('Navigation', () => {
   });
 
   test('profile panel prompts sign-in when signed out', async ({ page }) => {
-    await page.locator('[data-panel="profile"]').first().click();
-    await expect(page.locator('#panel-profile')).toHaveClass(/active/);
+    await gotoPanel(page, 'profile');
     await page.waitForTimeout(800);
     const content = page.locator('#profile-content');
     await expect(content).toBeVisible();
@@ -47,15 +51,21 @@ test.describe('Navigation', () => {
   });
 
   test('dashboard shows stats, impact chart and severity bars', async ({ page }) => {
-    await page.locator('[data-panel="dashboard"]').first().click();
-    await expect(page.locator('#panel-dashboard')).toHaveClass(/active/);
+    await gotoPanel(page, 'dashboard');
     await expect(page.locator('#stats-grid .stat-card').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('#week-impact .week-row').first()).toBeVisible();
     await expect(page.locator('#severity-bars .sev-row').first()).toBeVisible();
   });
 
   test('auth modal opens and closes', async ({ page }) => {
-    await page.locator('#signin-open').click();
+    // Viewport-aware entry point: sidebar button on desktop, Profile CTA on mobile
+    const desktopBtn = page.locator('#signin-open');
+    if (await desktopBtn.isVisible()) {
+      await desktopBtn.click();
+    } else {
+      await gotoPanel(page, 'profile');
+      await page.locator('#profile-content button:has-text("Sign In")').first().click();
+    }
     await expect(page.locator('#auth-modal')).toBeVisible();
     await page.locator('#auth-cancel').click();
     await expect(page.locator('#auth-modal')).toBeHidden();
